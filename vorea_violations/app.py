@@ -132,17 +132,25 @@ DATASETS = {
 
 BASE_URL = "https://data.cityofnewyork.us/resource"
 
+# Fields monitored for field-level change detection (per source)
+_TRACKED_FIELDS = {
+    "DOB ECB Violations":                  ["ecb_violation_status", "penality_imposed", "certificate_status"],
+    "OATH Hearings (DOT / All Agencies)":  ["hearing_status", "hearing_date", "civil_penalty_must_pay_amount"],
+    "DOT Street Construction Permits":     ["permitstatusshortdesc", "expirationdate"],
+}
+
 # ─── DATABASE ABSTRACTION (SQLite locally, Postgres on Vercel) ───────────────
 DB_PATH = os.path.join(os.path.dirname(__file__), 'projects.db')
 
 # Tables that have a SERIAL/AUTOINCREMENT primary key named 'id'
-_PG_SERIAL_TABLES = {'projects', 'project_bins', 'tco_items'}
+_PG_SERIAL_TABLES = {'projects', 'project_bins', 'tco_items', 'violation_snapshots', 'violation_changes'}
 
 # ON CONFLICT clauses for each upsert table
 _PG_UPSERT = {
-    'violation_cache': 'ON CONFLICT (source) DO UPDATE SET data_json=EXCLUDED.data_json, fetched_at=EXCLUDED.fetched_at, search_term=EXCLUDED.search_term',
-    'email_config':    'ON CONFLICT (id) DO UPDATE SET recipient=EXCLUDED.recipient, frequency=EXCLUDED.frequency, threshold=EXCLUDED.threshold, sources=EXCLUDED.sources, smtp_user=EXCLUDED.smtp_user, smtp_pass=EXCLUDED.smtp_pass',
-    'app_settings':    'ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
+    'violation_cache':     'ON CONFLICT (source) DO UPDATE SET data_json=EXCLUDED.data_json, fetched_at=EXCLUDED.fetched_at, search_term=EXCLUDED.search_term',
+    'violation_snapshots': 'ON CONFLICT (source, snapshot_date) DO UPDATE SET data_json=EXCLUDED.data_json, record_count=EXCLUDED.record_count, fetched_at=EXCLUDED.fetched_at',
+    'email_config':        'ON CONFLICT (id) DO UPDATE SET recipient=EXCLUDED.recipient, frequency=EXCLUDED.frequency, threshold=EXCLUDED.threshold, sources=EXCLUDED.sources, smtp_user=EXCLUDED.smtp_user, smtp_pass=EXCLUDED.smtp_pass',
+    'app_settings':        'ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
 }
 
 def _pg_table(sql):
@@ -371,6 +379,27 @@ _PG_SCHEMA = [
         fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         search_term TEXT DEFAULT ''
     )""",
+    """CREATE TABLE IF NOT EXISTS violation_snapshots (
+        id            SERIAL PRIMARY KEY,
+        source        TEXT NOT NULL,
+        snapshot_date TEXT NOT NULL,
+        data_json     TEXT NOT NULL,
+        record_count  INTEGER DEFAULT 0,
+        search_term   TEXT DEFAULT '',
+        fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(source, snapshot_date)
+    )""",
+    """CREATE TABLE IF NOT EXISTS violation_changes (
+        id           SERIAL PRIMARY KEY,
+        detected_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        source       TEXT NOT NULL,
+        record_id    TEXT NOT NULL,
+        change_type  TEXT NOT NULL,
+        old_value    TEXT DEFAULT '',
+        new_value    TEXT DEFAULT '',
+        address      TEXT DEFAULT '',
+        description  TEXT DEFAULT ''
+    )""",
     """CREATE TABLE IF NOT EXISTS app_settings (
         key   TEXT PRIMARY KEY,
         value TEXT DEFAULT ''
@@ -463,6 +492,27 @@ def init_db():
                     fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     search_term TEXT DEFAULT ''
                 );
+                CREATE TABLE IF NOT EXISTS violation_snapshots (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source        TEXT NOT NULL,
+                    snapshot_date TEXT NOT NULL,
+                    data_json     TEXT NOT NULL,
+                    record_count  INTEGER DEFAULT 0,
+                    search_term   TEXT DEFAULT '',
+                    fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source, snapshot_date)
+                );
+                CREATE TABLE IF NOT EXISTS violation_changes (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    detected_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source       TEXT NOT NULL,
+                    record_id    TEXT NOT NULL,
+                    change_type  TEXT NOT NULL,
+                    old_value    TEXT DEFAULT '',
+                    new_value    TEXT DEFAULT '',
+                    address      TEXT DEFAULT '',
+                    description  TEXT DEFAULT ''
+                );
                 CREATE TABLE IF NOT EXISTS app_settings (
                     key   TEXT PRIMARY KEY,
                     value TEXT DEFAULT ''
@@ -537,9 +587,49 @@ def _enrich_records(records, key):
         enriched.append(rec)
     return enriched
 
+def _detect_and_save_changes(conn, source, old_records, new_records):
+    """Compare old vs new enriched records; write detected changes to violation_changes."""
+    if not old_records:
+        return  # No baseline (first run) — skip
+    tracked = _TRACKED_FIELDS.get(source, [])
+    old_map = {r['_id']: r for r in old_records if r.get('_id')}
+    new_map = {r['_id']: r for r in new_records if r.get('_id')}
+    inserts = []
+    for rid, rec in new_map.items():
+        addr = rec.get('_address', '')
+        desc = rec.get('_status_val', '')
+        if rid not in old_map:
+            inserts.append((source, rid, 'new', '', '', addr, desc))
+        else:
+            old = old_map[rid]
+            old_sc = old.get('_status_class', '')
+            new_sc = rec.get('_status_class', '')
+            if old_sc != new_sc:
+                ctype = 'resolved' if new_sc == 'resolved' else 'status_changed'
+                inserts.append((source, rid, ctype,
+                                json.dumps({'status': old_sc}),
+                                json.dumps({'status': new_sc}),
+                                addr, desc))
+            else:
+                changed = {f: {'old': old.get(f, ''), 'new': rec.get(f, '')}
+                           for f in tracked if str(old.get(f, '')) != str(rec.get(f, ''))}
+                if changed:
+                    inserts.append((source, rid, 'field_changed',
+                                    json.dumps({f: v['old'] for f, v in changed.items()}),
+                                    json.dumps({f: v['new'] for f, v in changed.items()}),
+                                    addr, desc))
+    if inserts:
+        for row in inserts:
+            conn.execute(
+                'INSERT INTO violation_changes '
+                '(source, record_id, change_type, old_value, new_value, address, description) '
+                'VALUES (?,?,?,?,?,?,?)', row
+            )
+        logger.info("  Detected %d change(s) for %s", len(inserts), source)
+
+
 def refresh_all_cache(search=None):
-    """Fetch all datasets and store JSON in violation_cache table.
-    Writes an empty list for failed fetches so the cache is always considered complete."""
+    """Fetch all datasets, save daily snapshots, detect changes, and update violation_cache."""
     if search is None:
         try:
             _c = get_db()
@@ -548,21 +638,29 @@ def refresh_all_cache(search=None):
             search = _r['value'] if _r and _r['value'] else 'VOREA'
         except Exception:
             search = 'VOREA'
-    logger.info("=== Starting scheduled cache refresh for all datasets (search=%s) ===", search)
+    logger.info("=== Starting cache refresh for all datasets (search=%s) ===", search)
     conn = get_db()
+    today = datetime.utcnow().strftime('%Y-%m-%d')
     for key in DATASETS:
         logger.info("  Refreshing dataset: %s …", key)
+        # Read existing cache as baseline before overwriting
+        old_row = conn.execute('SELECT data_json FROM violation_cache WHERE source=?', (key,)).fetchone()
+        old_enriched = json.loads(old_row['data_json']) if old_row and old_row['data_json'] else []
         result = fetch_violations(key, search_term=search)
         if result["success"]:
             enriched = _enrich_records(result["data"], key)
             logger.info("  ✓ %s — %d records fetched, %d after enrichment", key, result["count"], len(enriched))
+            _detect_and_save_changes(conn, key, old_enriched, enriched)
+            conn.execute(
+                'INSERT OR REPLACE INTO violation_snapshots (source, snapshot_date, data_json, record_count, search_term) VALUES (?,?,?,?,?)',
+                (key, today, json.dumps(enriched), len(enriched), search)
+            )
+            conn.execute(
+                'INSERT OR REPLACE INTO violation_cache (source, data_json, fetched_at, search_term) VALUES (?, ?, CURRENT_TIMESTAMP, ?)',
+                (key, json.dumps(enriched), search)
+            )
         else:
-            enriched = []
-            logger.warning("  ✗ %s — FAILED: %s", key, result.get("error", "unknown error"))
-        conn.execute(
-            'INSERT OR REPLACE INTO violation_cache (source, data_json, fetched_at, search_term) VALUES (?, ?, CURRENT_TIMESTAMP, ?)',
-            (key, json.dumps(enriched), search)
-        )
+            logger.warning("  ✗ %s — FAILED: %s (cache unchanged)", key, result.get("error", "unknown error"))
     conn.commit()
     conn.close()
     logger.info("=== Cache refresh complete ===")
@@ -1000,7 +1098,7 @@ def get_violations():
 
 @app.route("/api/all")
 def get_all_violations():
-    """Serve from DB cache if fresh (<= 15 min); otherwise live-fetch and warm cache."""
+    """Serve from DB cache if fresh (<= 24 h); otherwise live-fetch, snapshot, detect changes."""
     search        = request.args.get("search", "VOREA")
     force_refresh = request.args.get("refresh", "false").lower() == "true"
 
@@ -1019,7 +1117,7 @@ def get_all_violations():
     search_changed = cached_search.upper() != search.upper()
     if search_changed and cache_rows:
         logger.info("  Cache search_term mismatch ('%s' vs '%s') — bypassing cache", cached_search, search)
-    use_cache    = not force_refresh and all_cached and oldest_age <= 15 and not search_changed
+    use_cache    = not force_refresh and all_cached and oldest_age <= 1440 and not search_changed
 
     all_results  = {}
     summary      = {"total": 0, "open": 0, "resolved": 0, "pending": 0, "by_source": {}}
@@ -1040,17 +1138,28 @@ def get_all_violations():
             summary["by_source"][key]    = {"count": len(enriched), **source_counts}
             all_results[key]             = enriched
     else:
-        # Live fetch — also warm the cache (write [] for failed sources)
+        # Live fetch — warm cache, write daily snapshot, detect changes
         logger.info("=== Live fetch triggered for all datasets (search=%s, force=%s) ===", search, force_refresh)
-        conn = get_db()
+        conn  = get_db()
+        today = datetime.utcnow().strftime('%Y-%m-%d')
         for key in DATASETS:
-            result        = fetch_violations(key, search_term=search)
+            old_enriched = json.loads(cache_map[key]['data_json']) if key in cache_map else []
+            result = fetch_violations(key, search_term=search)
             if result["success"]:
                 enriched = _enrich_records(result["data"], key)
                 logger.info("  ✓ %s — %d records, enriched %d", key, result["count"], len(enriched))
+                _detect_and_save_changes(conn, key, old_enriched, enriched)
+                conn.execute(
+                    'INSERT OR REPLACE INTO violation_snapshots (source, snapshot_date, data_json, record_count, search_term) VALUES (?,?,?,?,?)',
+                    (key, today, json.dumps(enriched), len(enriched), search)
+                )
+                conn.execute(
+                    'INSERT OR REPLACE INTO violation_cache (source, data_json, fetched_at, search_term) VALUES (?, ?, CURRENT_TIMESTAMP, ?)',
+                    (key, json.dumps(enriched), search)
+                )
             else:
-                enriched = []
-                logger.warning("  ✗ %s FAILED: %s", key, result.get("error", "unknown"))
+                enriched = old_enriched  # Keep stale data in memory for this response
+                logger.warning("  ✗ %s FAILED: %s (cache unchanged)", key, result.get("error", "unknown"))
             source_counts = {"open": 0, "resolved": 0, "pending": 0}
             for rec in enriched:
                 s = rec.get("_status_class", "pending")
@@ -1059,10 +1168,6 @@ def get_all_violations():
             summary["total"]         += len(enriched)
             summary["by_source"][key] = {"count": len(enriched), **source_counts}
             all_results[key]          = enriched
-            conn.execute(
-                'INSERT OR REPLACE INTO violation_cache (source, data_json, fetched_at, search_term) VALUES (?, ?, CURRENT_TIMESTAMP, ?)',
-                (key, json.dumps(enriched), search)
-            )
         conn.commit()
         conn.close()
         logger.info("=== Live fetch complete — total %d records ===", summary["total"])
@@ -1452,6 +1557,39 @@ def cache_status():
     return jsonify(result)
 
 
+@app.route('/api/changes/count')
+def get_changes_count():
+    """Return count of change events detected in the last 7 days (for badge display)."""
+    from datetime import timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    conn = get_db()
+    row  = conn.execute(
+        'SELECT COUNT(*) AS cnt FROM violation_changes WHERE detected_at >= ?', (cutoff,)
+    ).fetchone()
+    conn.close()
+    return jsonify({'count': row['cnt'] if row else 0})
+
+
+@app.route('/api/changes')
+def get_changes():
+    """Return recent change log entries, newest first."""
+    from datetime import timedelta
+    days   = int(request.args.get('days', 7))
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    conn   = get_db()
+    rows   = conn.execute(
+        'SELECT id, detected_at, source, record_id, change_type, old_value, new_value, address, description '
+        'FROM violation_changes WHERE detected_at >= ? ORDER BY detected_at DESC LIMIT 500',
+        (cutoff,)
+    ).fetchall()
+    conn.close()
+    return jsonify({
+        'changes': [dict(r) for r in rows],
+        'count':   len(rows),
+        'days':    days,
+    })
+
+
 @app.route('/api/email_config', methods=['GET'])
 def get_email_config():
     conn = get_db()
@@ -1525,7 +1663,7 @@ def save_app_settings():
 # ─── APScheduler startup (disabled on Vercel — no background threads in serverless) ──
 if HAS_SCHEDULER and not os.environ.get('VERCEL'):
     _sched = BackgroundScheduler(daemon=True)
-    _sched.add_job(refresh_all_cache, 'interval', minutes=10, id='cache_refresh',
+    _sched.add_job(refresh_all_cache, 'interval', hours=24, id='cache_refresh',
                    max_instances=1, coalesce=True)
     _sched.add_job(check_and_send_digest, 'interval', hours=1, id='digest_check',
                    max_instances=1, coalesce=True)

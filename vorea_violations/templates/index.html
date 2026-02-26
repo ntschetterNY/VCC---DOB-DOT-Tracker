@@ -744,6 +744,93 @@
       margin-top: 1.5rem;
     }
 
+    /* ── CHANGES PANEL ── */
+    .changes-panel {
+      position: fixed;
+      top: 0; right: 0; bottom: 0;
+      width: 380px;
+      max-width: 95vw;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 300;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.35);
+      transform: translateX(100%);
+      transition: transform .25s ease;
+    }
+    .changes-panel.open { transform: translateX(0); }
+    .changes-panel-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 299;
+    }
+    .changes-panel-overlay.open { display: block; }
+    .changes-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .85rem 1rem;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .changes-panel-body {
+      overflow-y: auto;
+      flex: 1;
+      padding: .5rem 0;
+    }
+    .change-date-group { padding: .5rem 1rem .25rem; }
+    .change-date-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .change-item {
+      padding: .45rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: .5rem;
+      align-items: flex-start;
+    }
+    .change-icon { font-size: 14px; flex-shrink: 0; padding-top: 1px; }
+    .change-meta { flex: 1; min-width: 0; }
+    .change-source {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .change-addr { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .change-desc { font-size: 11px; color: var(--text-muted); }
+    .changes-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #e53e3e;
+      color: #fff;
+      border-radius: 8px;
+      font-size: 9px;
+      font-weight: 700;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      vertical-align: middle;
+      margin-left: 3px;
+      line-height: 1;
+    }
+    .changes-empty { padding: 2rem 1rem; text-align: center; color: var(--text-muted); font-size: 12px; }
+
     /* ── TOAST ── */
     .toast {
       position: fixed;
@@ -950,6 +1037,7 @@
       Export
     </button>
     <button class="btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark theme">☀️</button>
+    <button class="btn" id="changesBtn" onclick="openChangesPanel()" title="Recent changes">🔔<span id="changesBadge" class="changes-badge" style="display:none"></span></button>
     <button class="btn" id="settingsBtn" onclick="openSettingsModal()" title="Settings">⚙️</button>
   </div>
 </header>
@@ -3598,6 +3686,123 @@ if (saved) {
 }
 
 loadSettings().then(() => fetchAll());
+setTimeout(loadChangesCount, 2000);
+</script>
+
+<!-- ── CHANGES PANEL ── -->
+<div class="changes-panel-overlay" id="changesPanelOverlay" onclick="closeChangesPanel()"></div>
+<div class="changes-panel" id="changesPanel">
+  <div class="changes-panel-header">
+    <span>Recent Changes</span>
+    <button class="btn" onclick="closeChangesPanel()" style="padding:2px 8px;font-size:14px">✕</button>
+  </div>
+  <div class="changes-panel-body" id="changesPanelBody">
+    <div class="changes-empty">Loading…</div>
+  </div>
+</div>
+
+<script>
+// ── CHANGES PANEL ────────────────────────────────────────────────────────────
+const _CHANGE_ICON  = { new:'🆕', resolved:'✅', status_changed:'🔄', field_changed:'📝' };
+const _CHANGE_LABEL = { new:'New', resolved:'Resolved', status_changed:'Status changed', field_changed:'Field updated' };
+const _SOURCE_SHORT = {
+  'DOB ECB Violations':                 'DOB ECB',
+  'OATH Hearings (DOT / All Agencies)': 'OATH',
+  'DOT Street Construction Permits':    'DOT',
+};
+
+function loadChangesCount() {
+  fetch('/api/changes/count')
+    .then(r => r.json())
+    .then(d => {
+      const badge = document.getElementById('changesBadge');
+      if (d.count > 0) {
+        badge.textContent = d.count > 99 ? '99+' : d.count;
+        badge.style.display = 'inline-flex';
+      } else {
+        badge.style.display = 'none';
+      }
+    }).catch(() => {});
+}
+
+function openChangesPanel() {
+  document.getElementById('changesPanel').classList.add('open');
+  document.getElementById('changesPanelOverlay').classList.add('open');
+  loadChangesPanel();
+}
+
+function closeChangesPanel() {
+  document.getElementById('changesPanel').classList.remove('open');
+  document.getElementById('changesPanelOverlay').classList.remove('open');
+}
+
+function loadChangesPanel(days = 7) {
+  const body = document.getElementById('changesPanelBody');
+  body.innerHTML = '<div class="changes-empty">Loading…</div>';
+  fetch(`/api/changes?days=${days}`)
+    .then(r => r.json())
+    .then(d => renderChanges(d.changes))
+    .catch(() => { body.innerHTML = '<div class="changes-empty">Failed to load changes.</div>'; });
+}
+
+function renderChanges(changes) {
+  const body = document.getElementById('changesPanelBody');
+  if (!changes || changes.length === 0) {
+    body.innerHTML = '<div class="changes-empty">No changes detected in the last 7 days.<br><small>Changes are recorded each time data is refreshed from source.</small></div>';
+    return;
+  }
+  // Group by date (YYYY-MM-DD)
+  const byDate = {};
+  for (const c of changes) {
+    const day = (c.detected_at || '').slice(0, 10);
+    if (!byDate[day]) byDate[day] = [];
+    byDate[day].push(c);
+  }
+  let html = '';
+  for (const day of Object.keys(byDate).sort().reverse()) {
+    const label = formatChangeDate(day);
+    html += `<div class="change-date-group"><div class="change-date-label">${label}</div></div>`;
+    for (const c of byDate[day]) {
+      const icon  = _CHANGE_ICON[c.change_type]  || '•';
+      const lbl   = _CHANGE_LABEL[c.change_type] || c.change_type;
+      const src   = _SOURCE_SHORT[c.source] || c.source;
+      const addr  = c.address  || c.record_id || '—';
+      let   desc  = c.description || '';
+      if (c.change_type === 'field_changed') {
+        try {
+          const nv = JSON.parse(c.new_value || '{}');
+          desc = Object.entries(nv).map(([k,v]) => `${k}: ${v}`).join(', ');
+        } catch(e) {}
+      } else if (c.change_type === 'status_changed' || c.change_type === 'resolved') {
+        try {
+          const ov = JSON.parse(c.old_value || '{}');
+          const nv = JSON.parse(c.new_value || '{}');
+          desc = `${ov.status || ''} → ${nv.status || ''}`;
+        } catch(e) {}
+      }
+      html += `<div class="change-item">
+        <div class="change-icon">${icon}</div>
+        <div class="change-meta">
+          <div class="change-source">${src} · ${lbl}</div>
+          <div class="change-addr" title="${escHtml(addr)}">${escHtml(addr)}</div>
+          ${desc ? `<div class="change-desc">${escHtml(desc)}</div>` : ''}
+        </div>
+      </div>`;
+    }
+  }
+  body.innerHTML = html;
+}
+
+function formatChangeDate(dateStr) {
+  try {
+    const d = new Date(dateStr + 'T12:00:00');
+    return d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+  } catch(e) { return dateStr; }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 </script>
 </body>
 </html>
