@@ -1,4 +1,6 @@
-from flask import Flask, render_template, jsonify, request, send_file
+from flask import Flask, render_template, jsonify, request, send_file, session, redirect, url_for
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 import requests
 import io
 import csv
@@ -35,6 +37,7 @@ except ImportError:
     HAS_SCHEDULER = False
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-change-in-prod')
 
 # ─── NYC Open Data Dataset IDs ────────────────────────────────────────────────
 DATASETS = {
@@ -143,14 +146,15 @@ _TRACKED_FIELDS = {
 DB_PATH = os.path.join(os.path.dirname(__file__), 'projects.db')
 
 # Tables that have a SERIAL/AUTOINCREMENT primary key named 'id'
-_PG_SERIAL_TABLES = {'projects', 'project_bins', 'tco_items', 'violation_snapshots', 'violation_changes'}
+_PG_SERIAL_TABLES = {'projects', 'project_bins', 'tco_items', 'violation_snapshots', 'violation_changes', 'users'}
 
 # ON CONFLICT clauses for each upsert table
 _PG_UPSERT = {
-    'violation_cache':     'ON CONFLICT (source) DO UPDATE SET data_json=EXCLUDED.data_json, fetched_at=EXCLUDED.fetched_at, search_term=EXCLUDED.search_term',
-    'violation_snapshots': 'ON CONFLICT (source, snapshot_date) DO UPDATE SET data_json=EXCLUDED.data_json, record_count=EXCLUDED.record_count, fetched_at=EXCLUDED.fetched_at',
+    'violation_cache':     'ON CONFLICT (source, domain) DO UPDATE SET data_json=EXCLUDED.data_json, fetched_at=EXCLUDED.fetched_at, search_term=EXCLUDED.search_term',
+    'violation_snapshots': 'ON CONFLICT (source, snapshot_date, domain) DO UPDATE SET data_json=EXCLUDED.data_json, record_count=EXCLUDED.record_count, fetched_at=EXCLUDED.fetched_at',
     'email_config':        'ON CONFLICT (id) DO UPDATE SET recipient=EXCLUDED.recipient, frequency=EXCLUDED.frequency, threshold=EXCLUDED.threshold, sources=EXCLUDED.sources, smtp_user=EXCLUDED.smtp_user, smtp_pass=EXCLUDED.smtp_pass',
-    'app_settings':        'ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
+    'app_settings':        'ON CONFLICT (key, domain) DO UPDATE SET value=EXCLUDED.value',
+    'company_domains':     'ON CONFLICT (domain) DO NOTHING',
 }
 
 def _pg_table(sql):
@@ -341,12 +345,25 @@ def _migrate_v1_to_v2(conn):
 
 
 _PG_SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS company_domains (
+        domain       TEXT PRIMARY KEY,
+        company_name TEXT NOT NULL,
+        search_term  TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS users (
+        id            SERIAL PRIMARY KEY,
+        email         TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        domain        TEXT NOT NULL,
+        created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
     """CREATE TABLE IF NOT EXISTS projects (
         id           SERIAL PRIMARY KEY,
         project_name TEXT NOT NULL,
         address      TEXT DEFAULT '',
         borough      TEXT DEFAULT '',
         notes        TEXT DEFAULT '',
+        domain       TEXT NOT NULL DEFAULT '',
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
     """CREATE TABLE IF NOT EXISTS project_bins (
@@ -374,24 +391,28 @@ _PG_SCHEMA = [
         FOREIGN KEY (project_id) REFERENCES projects(id)
     )""",
     """CREATE TABLE IF NOT EXISTS violation_cache (
-        source      TEXT PRIMARY KEY,
+        source      TEXT NOT NULL,
+        domain      TEXT NOT NULL DEFAULT '',
         data_json   TEXT,
         fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        search_term TEXT DEFAULT ''
+        search_term TEXT DEFAULT '',
+        PRIMARY KEY (source, domain)
     )""",
     """CREATE TABLE IF NOT EXISTS violation_snapshots (
         id            SERIAL PRIMARY KEY,
         source        TEXT NOT NULL,
+        domain        TEXT NOT NULL DEFAULT '',
         snapshot_date TEXT NOT NULL,
         data_json     TEXT NOT NULL,
         record_count  INTEGER DEFAULT 0,
         search_term   TEXT DEFAULT '',
         fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(source, snapshot_date)
+        UNIQUE(source, snapshot_date, domain)
     )""",
     """CREATE TABLE IF NOT EXISTS violation_changes (
         id           SERIAL PRIMARY KEY,
         detected_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        domain       TEXT NOT NULL DEFAULT '',
         source       TEXT NOT NULL,
         record_id    TEXT NOT NULL,
         change_type  TEXT NOT NULL,
@@ -401,8 +422,10 @@ _PG_SCHEMA = [
         description  TEXT DEFAULT ''
     )""",
     """CREATE TABLE IF NOT EXISTS app_settings (
-        key   TEXT PRIMARY KEY,
-        value TEXT DEFAULT ''
+        key    TEXT NOT NULL,
+        domain TEXT NOT NULL DEFAULT '',
+        value  TEXT DEFAULT '',
+        PRIMARY KEY (key, domain)
     )""",
     """CREATE TABLE IF NOT EXISTS email_config (
         id         INTEGER PRIMARY KEY,
@@ -416,22 +439,29 @@ _PG_SCHEMA = [
     )""",
 ]
 
+# Pre-configured company domains
+_DEFAULT_DOMAINS = [
+    ('domaincos.com', 'VOREA', 'VOREA'),
+    ('vorea.com',     'VOREA', 'VOREA'),
+    ('schimenti.com', 'Schimenti', 'Schimenti'),
+]
+
 
 def _seed_projects(conn):
-    """Insert default projects/BINs when the projects table is empty."""
-    count = conn.execute("SELECT COUNT(*) AS cnt FROM projects").fetchone()['cnt']
+    """Insert default projects/BINs for domaincos.com when that domain has no projects."""
+    count = conn.execute("SELECT COUNT(*) AS cnt FROM projects WHERE domain=?", ('domaincos.com',)).fetchone()['cnt']
     if count == 0:
-        c1   = conn.execute("INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
-                            ('1940 Jerome Ave', '1940 Jerome Ave', 'Bronx'))
+        c1   = conn.execute("INSERT INTO projects (project_name, address, borough, domain) VALUES (?,?,?,?)",
+                            ('1940 Jerome Ave', '1940 Jerome Ave', 'Bronx', 'domaincos.com'))
         pid1 = c1.lastrowid
-        c2   = conn.execute("INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
-                            ('291 Livingston', '291 Livingston St', 'Brooklyn'))
+        c2   = conn.execute("INSERT INTO projects (project_name, address, borough, domain) VALUES (?,?,?,?)",
+                            ('291 Livingston', '291 Livingston St', 'Brooklyn', 'domaincos.com'))
         pid2 = c2.lastrowid
         conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2008251','',1))
         conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2129813','1940J - New BIN',0))
         conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid2,'3000479','291L',1))
         conn.commit()
-        logger.info("Seeded default projects (fresh DB)")
+        logger.info("Seeded default projects for domaincos.com")
 
 
 def init_db():
@@ -444,7 +474,7 @@ def init_db():
             conn._cur.execute(stmt)
         conn.commit()
     else:
-        # ── SQLite: check for old v1 schema, migrate if needed ────────────────
+        # ── SQLite ────────────────────────────────────────────────────────────
         try:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
         except Exception:
@@ -452,93 +482,139 @@ def init_db():
 
         if cols and 'bin' in cols and 'id' not in cols:
             _migrate_v1_to_v2(conn)
-        else:
-            conn.executescript('''
-                CREATE TABLE IF NOT EXISTS projects (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_name TEXT NOT NULL,
-                    address      TEXT DEFAULT '',
-                    borough      TEXT DEFAULT '',
-                    notes        TEXT DEFAULT '',
-                    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS project_bins (
-                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id     INTEGER NOT NULL,
-                    bin            TEXT NOT NULL,
-                    label          TEXT DEFAULT '',
-                    dob_job_number TEXT DEFAULT '',
-                    is_primary     INTEGER DEFAULT 1,
-                    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(project_id, bin),
-                    FOREIGN KEY (project_id) REFERENCES projects(id)
-                );
-                CREATE TABLE IF NOT EXISTS tco_items (
-                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id        INTEGER NOT NULL,
-                    section           TEXT NOT NULL,
-                    item_ref          TEXT DEFAULT '',
-                    description       TEXT NOT NULL,
-                    responsible_party TEXT DEFAULT '',
-                    status            TEXT DEFAULT 'open',
-                    notes             TEXT DEFAULT '',
-                    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (project_id) REFERENCES projects(id)
-                );
-                CREATE TABLE IF NOT EXISTS violation_cache (
-                    source      TEXT PRIMARY KEY,
-                    data_json   TEXT,
-                    fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    search_term TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS violation_snapshots (
-                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source        TEXT NOT NULL,
-                    snapshot_date TEXT NOT NULL,
-                    data_json     TEXT NOT NULL,
-                    record_count  INTEGER DEFAULT 0,
-                    search_term   TEXT DEFAULT '',
-                    fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(source, snapshot_date)
-                );
-                CREATE TABLE IF NOT EXISTS violation_changes (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    detected_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    source       TEXT NOT NULL,
-                    record_id    TEXT NOT NULL,
-                    change_type  TEXT NOT NULL,
-                    old_value    TEXT DEFAULT '',
-                    new_value    TEXT DEFAULT '',
-                    address      TEXT DEFAULT '',
-                    description  TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS app_settings (
-                    key   TEXT PRIMARY KEY,
-                    value TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS email_config (
-                    id         INTEGER PRIMARY KEY,
-                    recipient  TEXT DEFAULT '',
-                    frequency  TEXT DEFAULT 'daily',
-                    threshold  TEXT DEFAULT 'all',
-                    sources    TEXT DEFAULT '[]',
-                    last_sent  TIMESTAMP,
-                    smtp_user  TEXT DEFAULT '',
-                    smtp_pass  TEXT DEFAULT ''
-                );
-            ''')
+
+        # Base tables (idempotent)
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS company_domains (
+                domain       TEXT PRIMARY KEY,
+                company_name TEXT NOT NULL,
+                search_term  TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                email         TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                domain        TEXT NOT NULL,
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS projects (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                address      TEXT DEFAULT '',
+                borough      TEXT DEFAULT '',
+                notes        TEXT DEFAULT '',
+                domain       TEXT NOT NULL DEFAULT '',
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS project_bins (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id     INTEGER NOT NULL,
+                bin            TEXT NOT NULL,
+                label          TEXT DEFAULT '',
+                dob_job_number TEXT DEFAULT '',
+                is_primary     INTEGER DEFAULT 1,
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, bin),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            );
+            CREATE TABLE IF NOT EXISTS tco_items (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id        INTEGER NOT NULL,
+                section           TEXT NOT NULL,
+                item_ref          TEXT DEFAULT '',
+                description       TEXT NOT NULL,
+                responsible_party TEXT DEFAULT '',
+                status            TEXT DEFAULT 'open',
+                notes             TEXT DEFAULT '',
+                created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            );
+            CREATE TABLE IF NOT EXISTS email_config (
+                id         INTEGER PRIMARY KEY,
+                recipient  TEXT DEFAULT '',
+                frequency  TEXT DEFAULT 'daily',
+                threshold  TEXT DEFAULT 'all',
+                sources    TEXT DEFAULT '[]',
+                last_sent  TIMESTAMP,
+                smtp_user  TEXT DEFAULT '',
+                smtp_pass  TEXT DEFAULT ''
+            );
+        ''')
+        conn.commit()
+
+        # Migrations: add domain column to projects (safe if already exists)
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN domain TEXT NOT NULL DEFAULT ''")
+            conn.execute("UPDATE projects SET domain='domaincos.com' WHERE domain=''")
             conn.commit()
-            try:
-                conn.execute("ALTER TABLE violation_cache ADD COLUMN search_term TEXT DEFAULT ''")
-                conn.commit()
-            except Exception:
-                pass
-            try:
-                conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT DEFAULT '')")
-                conn.commit()
-            except Exception:
-                pass
+        except Exception:
+            pass
+
+        # Recreate domain-aware tables (drop + recreate — these are cache/log tables)
+        conn.executescript('''
+            DROP TABLE IF EXISTS violation_cache;
+            DROP TABLE IF EXISTS violation_snapshots;
+            DROP TABLE IF EXISTS violation_changes;
+            CREATE TABLE violation_cache (
+                source      TEXT NOT NULL,
+                domain      TEXT NOT NULL DEFAULT '',
+                data_json   TEXT,
+                fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                search_term TEXT DEFAULT '',
+                PRIMARY KEY (source, domain)
+            );
+            CREATE TABLE violation_snapshots (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                source        TEXT NOT NULL,
+                domain        TEXT NOT NULL DEFAULT '',
+                snapshot_date TEXT NOT NULL,
+                data_json     TEXT NOT NULL,
+                record_count  INTEGER DEFAULT 0,
+                search_term   TEXT DEFAULT '',
+                fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source, snapshot_date, domain)
+            );
+            CREATE TABLE violation_changes (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                detected_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                domain       TEXT NOT NULL DEFAULT '',
+                source       TEXT NOT NULL,
+                record_id    TEXT NOT NULL,
+                change_type  TEXT NOT NULL,
+                old_value    TEXT DEFAULT '',
+                new_value    TEXT DEFAULT '',
+                address      TEXT DEFAULT '',
+                description  TEXT DEFAULT ''
+            );
+        ''')
+        conn.commit()
+
+        # Recreate app_settings with composite (key, domain) PK — migrate existing rows
+        conn.executescript('''
+            CREATE TABLE IF NOT EXISTS app_settings_new (
+                key    TEXT NOT NULL,
+                domain TEXT NOT NULL DEFAULT '',
+                value  TEXT DEFAULT '',
+                PRIMARY KEY (key, domain)
+            );
+            INSERT OR IGNORE INTO app_settings_new (key, domain, value)
+                SELECT key, 'domaincos.com', value FROM app_settings WHERE typeof(key)='text';
+            DROP TABLE IF EXISTS app_settings;
+            ALTER TABLE app_settings_new RENAME TO app_settings;
+        ''')
+        conn.commit()
+
+    # Seed company domains (both PG and SQLite)
+    for domain, company_name, search_term in _DEFAULT_DOMAINS:
+        try:
+            conn.execute(
+                'INSERT OR IGNORE INTO company_domains (domain, company_name, search_term) VALUES (?,?,?)',
+                (domain, company_name, search_term)
+            )
+        except Exception:
+            pass
+    conn.commit()
 
     try:
         _seed_projects(conn)
@@ -548,6 +624,102 @@ def init_db():
     conn.close()
 
 init_db()
+
+# ─── Auth helpers ─────────────────────────────────────────────────────────────
+def login_required(f):
+    """Decorator: redirect to /login for pages, 401 JSON for API routes."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Not authenticated', 'redirect': '/login'}), 401
+            return redirect('/login')
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _get_domain_config(domain, conn):
+    """Return company_domains row for a given domain, or None."""
+    return conn.execute('SELECT * FROM company_domains WHERE domain=?', (domain,)).fetchone()
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'GET':
+        if 'user_id' in session:
+            return redirect('/')
+        return render_template('login.html', mode='login')
+    # POST
+    data     = request.get_json(silent=True) or {}
+    email    = (data.get('email') or '').strip().lower()
+    password = data.get('password', '')
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+    conn = get_db()
+    user = conn.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
+    if not user or not check_password_hash(user['password_hash'], password):
+        conn.close()
+        return jsonify({'error': 'Invalid email or password'}), 401
+    domain  = user['domain']
+    company = _get_domain_config(domain, conn)
+    conn.close()
+    session.clear()
+    session['user_id']      = user['id']
+    session['email']        = user['email']
+    session['domain']       = domain
+    session['company_name'] = company['company_name'] if company else domain
+    session['search_term']  = company['search_term']  if company else domain
+    return jsonify({'ok': True})
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'GET':
+        if 'user_id' in session:
+            return redirect('/')
+        return render_template('login.html', mode='register')
+    # POST
+    data     = request.get_json(silent=True) or {}
+    email    = (data.get('email') or '').strip().lower()
+    password = data.get('password', '')
+    confirm  = data.get('confirm', '')
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+    if password != confirm:
+        return jsonify({'error': 'Passwords do not match'}), 400
+    if '@' not in email:
+        return jsonify({'error': 'Invalid email address'}), 400
+    domain = email.split('@')[1]
+    conn   = get_db()
+    company = _get_domain_config(domain, conn)
+    if not company:
+        conn.close()
+        return jsonify({'error': f'The domain @{domain} is not authorized. Contact your administrator.'}), 403
+    existing = conn.execute('SELECT id FROM users WHERE email=?', (email,)).fetchone()
+    if existing:
+        conn.close()
+        return jsonify({'error': 'An account with this email already exists'}), 409
+    conn.execute(
+        'INSERT INTO users (email, password_hash, domain) VALUES (?,?,?)',
+        (email, generate_password_hash(password), domain)
+    )
+    conn.commit()
+    user = conn.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
+    conn.close()
+    session.clear()
+    session['user_id']      = user['id']
+    session['email']        = user['email']
+    session['domain']       = domain
+    session['company_name'] = company['company_name']
+    session['search_term']  = company['search_term']
+    return jsonify({'ok': True})
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/login')
+
 
 # ─── Background Cache ─────────────────────────────────────────────────────────
 def _enrich_records(records, key):
@@ -587,7 +759,7 @@ def _enrich_records(records, key):
         enriched.append(rec)
     return enriched
 
-def _detect_and_save_changes(conn, source, old_records, new_records):
+def _detect_and_save_changes(conn, domain, source, old_records, new_records):
     """Compare old vs new enriched records; write detected changes to violation_changes."""
     if not old_records:
         return  # No baseline (first run) — skip
@@ -599,14 +771,14 @@ def _detect_and_save_changes(conn, source, old_records, new_records):
         addr = rec.get('_address', '')
         desc = rec.get('_status_val', '')
         if rid not in old_map:
-            inserts.append((source, rid, 'new', '', '', addr, desc))
+            inserts.append((domain, source, rid, 'new', '', '', addr, desc))
         else:
             old = old_map[rid]
             old_sc = old.get('_status_class', '')
             new_sc = rec.get('_status_class', '')
             if old_sc != new_sc:
                 ctype = 'resolved' if new_sc == 'resolved' else 'status_changed'
-                inserts.append((source, rid, ctype,
+                inserts.append((domain, source, rid, ctype,
                                 json.dumps({'status': old_sc}),
                                 json.dumps({'status': new_sc}),
                                 addr, desc))
@@ -614,7 +786,7 @@ def _detect_and_save_changes(conn, source, old_records, new_records):
                 changed = {f: {'old': old.get(f, ''), 'new': rec.get(f, '')}
                            for f in tracked if str(old.get(f, '')) != str(rec.get(f, ''))}
                 if changed:
-                    inserts.append((source, rid, 'field_changed',
+                    inserts.append((domain, source, rid, 'field_changed',
                                     json.dumps({f: v['old'] for f, v in changed.items()}),
                                     json.dumps({f: v['new'] for f, v in changed.items()}),
                                     addr, desc))
@@ -622,48 +794,53 @@ def _detect_and_save_changes(conn, source, old_records, new_records):
         for row in inserts:
             conn.execute(
                 'INSERT INTO violation_changes '
-                '(source, record_id, change_type, old_value, new_value, address, description) '
-                'VALUES (?,?,?,?,?,?,?)', row
+                '(domain, source, record_id, change_type, old_value, new_value, address, description) '
+                'VALUES (?,?,?,?,?,?,?,?)', row
             )
-        logger.info("  Detected %d change(s) for %s", len(inserts), source)
+        logger.info("  Detected %d change(s) for %s [%s]", len(inserts), source, domain)
 
 
-def refresh_all_cache(search=None):
-    """Fetch all datasets, save daily snapshots, detect changes, and update violation_cache."""
-    if search is None:
-        try:
-            _c = get_db()
-            _r = _c.execute("SELECT value FROM app_settings WHERE key='search_term'").fetchone()
-            _c.close()
-            search = _r['value'] if _r and _r['value'] else 'VOREA'
-        except Exception:
-            search = 'VOREA'
-    logger.info("=== Starting cache refresh for all datasets (search=%s) ===", search)
-    conn = get_db()
-    today = datetime.utcnow().strftime('%Y-%m-%d')
+def _refresh_domain(conn, domain, search, today):
+    """Fetch all datasets for a single domain, update cache + snapshots + change log."""
     for key in DATASETS:
-        logger.info("  Refreshing dataset: %s …", key)
-        # Read existing cache as baseline before overwriting
-        old_row = conn.execute('SELECT data_json FROM violation_cache WHERE source=?', (key,)).fetchone()
+        old_row = conn.execute(
+            'SELECT data_json FROM violation_cache WHERE source=? AND domain=?', (key, domain)
+        ).fetchone()
         old_enriched = json.loads(old_row['data_json']) if old_row and old_row['data_json'] else []
         result = fetch_violations(key, search_term=search)
         if result["success"]:
             enriched = _enrich_records(result["data"], key)
-            logger.info("  ✓ %s — %d records fetched, %d after enrichment", key, result["count"], len(enriched))
-            _detect_and_save_changes(conn, key, old_enriched, enriched)
+            logger.info("  ✓ [%s] %s — %d records", domain, key, len(enriched))
+            _detect_and_save_changes(conn, domain, key, old_enriched, enriched)
             conn.execute(
-                'INSERT OR REPLACE INTO violation_snapshots (source, snapshot_date, data_json, record_count, search_term) VALUES (?,?,?,?,?)',
-                (key, today, json.dumps(enriched), len(enriched), search)
+                'INSERT OR REPLACE INTO violation_snapshots '
+                '(source, domain, snapshot_date, data_json, record_count, search_term) VALUES (?,?,?,?,?,?)',
+                (key, domain, today, json.dumps(enriched), len(enriched), search)
             )
             conn.execute(
-                'INSERT OR REPLACE INTO violation_cache (source, data_json, fetched_at, search_term) VALUES (?, ?, CURRENT_TIMESTAMP, ?)',
-                (key, json.dumps(enriched), search)
+                'INSERT OR REPLACE INTO violation_cache '
+                '(source, domain, data_json, fetched_at, search_term) VALUES (?,?,?,CURRENT_TIMESTAMP,?)',
+                (key, domain, json.dumps(enriched), search)
             )
         else:
-            logger.warning("  ✗ %s — FAILED: %s (cache unchanged)", key, result.get("error", "unknown error"))
+            logger.warning("  ✗ [%s] %s — FAILED (cache unchanged): %s", domain, key, result.get("error"))
+
+
+def refresh_all_cache():
+    """Fetch all datasets for every configured domain; save snapshots and detect changes."""
+    logger.info("=== Starting scheduled cache refresh (all domains) ===")
+    conn  = get_db()
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    try:
+        domain_rows = conn.execute('SELECT domain, search_term FROM company_domains').fetchall()
+    except Exception:
+        domain_rows = [{'domain': 'domaincos.com', 'search_term': 'VOREA'}]
+    for row in domain_rows:
+        logger.info("  Domain: %s (search=%s)", row['domain'], row['search_term'])
+        _refresh_domain(conn, row['domain'], row['search_term'], today)
     conn.commit()
     conn.close()
-    logger.info("=== Cache refresh complete ===")
+    logger.info("=== Scheduled cache refresh complete ===")
 
 
 def _cache_age_minutes(fetched_at_str):
@@ -1067,14 +1244,18 @@ def classify_status(record, dataset_key):
 
 
 @app.route("/")
+@login_required
 def index():
-    return render_template("index.html", datasets=DATASETS)
+    return render_template("index.html", datasets=DATASETS,
+                           company_name=session.get('company_name', 'VOREA'),
+                           user_email=session.get('email', ''))
 
 
 @app.route("/api/violations")
+@login_required
 def get_violations():
     dataset = request.args.get("dataset", "DOB Violations")
-    search = request.args.get("search", "VOREA")
+    search  = session.get('search_term', 'VOREA')
 
     if dataset not in DATASETS:
         return jsonify({"error": "Unknown dataset"}), 400
@@ -1097,32 +1278,29 @@ def get_violations():
 
 
 @app.route("/api/all")
+@login_required
 def get_all_violations():
     """Serve from DB cache if fresh (<= 24 h); otherwise live-fetch, snapshot, detect changes."""
-    search        = request.args.get("search", "VOREA")
+    domain        = session['domain']
+    search        = session['search_term']
     force_refresh = request.args.get("refresh", "false").lower() == "true"
 
     conn       = get_db()
     cache_rows = conn.execute(
-        'SELECT source, data_json, fetched_at, search_term FROM violation_cache'
+        'SELECT source, data_json, fetched_at, search_term FROM violation_cache WHERE domain=?', (domain,)
     ).fetchall()
     conn.close()
 
     # Check if all sources are cached and fresh
-    cache_map      = {r['source']: r for r in cache_rows}
-    all_cached     = len(cache_map) == len(DATASETS)
-    oldest_age     = max((_cache_age_minutes(r['fetched_at']) for r in cache_rows), default=9999)
-    # Invalidate cache if search term changed
-    cached_search  = cache_rows[0]['search_term'] if cache_rows else ''
-    search_changed = cached_search.upper() != search.upper()
-    if search_changed and cache_rows:
-        logger.info("  Cache search_term mismatch ('%s' vs '%s') — bypassing cache", cached_search, search)
-    use_cache    = not force_refresh and all_cached and oldest_age <= 1440 and not search_changed
+    cache_map  = {r['source']: r for r in cache_rows}
+    all_cached = len(cache_map) == len(DATASETS)
+    oldest_age = max((_cache_age_minutes(r['fetched_at']) for r in cache_rows), default=9999)
+    use_cache  = not force_refresh and all_cached and oldest_age <= 1440
 
-    all_results  = {}
-    summary      = {"total": 0, "open": 0, "resolved": 0, "pending": 0, "by_source": {}}
-    from_cache   = False
-    cached_at    = None
+    all_results = {}
+    summary     = {"total": 0, "open": 0, "resolved": 0, "pending": 0, "by_source": {}}
+    from_cache  = False
+    cached_at   = None
 
     if use_cache:
         from_cache = True
@@ -1134,32 +1312,24 @@ def get_all_violations():
                 s = rec.get("_status_class", "pending")
                 source_counts[s] = source_counts.get(s, 0) + 1
                 summary[s]       = summary.get(s, 0) + 1
-            summary["total"]            += len(enriched)
-            summary["by_source"][key]    = {"count": len(enriched), **source_counts}
-            all_results[key]             = enriched
+            summary["total"]         += len(enriched)
+            summary["by_source"][key] = {"count": len(enriched), **source_counts}
+            all_results[key]          = enriched
     else:
         # Live fetch — warm cache, write daily snapshot, detect changes
-        logger.info("=== Live fetch triggered for all datasets (search=%s, force=%s) ===", search, force_refresh)
+        logger.info("=== Live fetch [%s] (search=%s, force=%s) ===", domain, search, force_refresh)
         conn  = get_db()
         today = datetime.utcnow().strftime('%Y-%m-%d')
-        for key in DATASETS:
-            old_enriched = json.loads(cache_map[key]['data_json']) if key in cache_map else []
-            result = fetch_violations(key, search_term=search)
-            if result["success"]:
-                enriched = _enrich_records(result["data"], key)
-                logger.info("  ✓ %s — %d records, enriched %d", key, result["count"], len(enriched))
-                _detect_and_save_changes(conn, key, old_enriched, enriched)
-                conn.execute(
-                    'INSERT OR REPLACE INTO violation_snapshots (source, snapshot_date, data_json, record_count, search_term) VALUES (?,?,?,?,?)',
-                    (key, today, json.dumps(enriched), len(enriched), search)
-                )
-                conn.execute(
-                    'INSERT OR REPLACE INTO violation_cache (source, data_json, fetched_at, search_term) VALUES (?, ?, CURRENT_TIMESTAMP, ?)',
-                    (key, json.dumps(enriched), search)
-                )
-            else:
-                enriched = old_enriched  # Keep stale data in memory for this response
-                logger.warning("  ✗ %s FAILED: %s (cache unchanged)", key, result.get("error", "unknown"))
+        _refresh_domain(conn, domain, search, today)
+        conn.commit()
+        # Re-read fresh data from cache for response
+        cache_rows = conn.execute(
+            'SELECT source, data_json, fetched_at FROM violation_cache WHERE domain=?', (domain,)
+        ).fetchall()
+        conn.close()
+        for row in cache_rows:
+            key      = row['source']
+            enriched = json.loads(row['data_json'] or '[]')
             source_counts = {"open": 0, "resolved": 0, "pending": 0}
             for rec in enriched:
                 s = rec.get("_status_class", "pending")
@@ -1168,8 +1338,6 @@ def get_all_violations():
             summary["total"]         += len(enriched)
             summary["by_source"][key] = {"count": len(enriched), **source_counts}
             all_results[key]          = enriched
-        conn.commit()
-        conn.close()
         logger.info("=== Live fetch complete — total %d records ===", summary["total"])
 
     return jsonify({
@@ -1181,9 +1349,10 @@ def get_all_violations():
 
 
 @app.route("/api/export")
+@login_required
 def export_csv():
     dataset = request.args.get("dataset", "all")
-    search = request.args.get("search", "VOREA")
+    search  = session['search_term']
 
     rows = []
     if dataset == "all":
@@ -1243,25 +1412,29 @@ def _project_with_bins(conn, project):
 
 
 @app.route('/api/projects', methods=['GET'])
+@login_required
 def get_projects():
-    conn = get_db()
-    projects = conn.execute('SELECT * FROM projects ORDER BY project_name').fetchall()
+    domain = session['domain']
+    conn   = get_db()
+    projects = conn.execute('SELECT * FROM projects WHERE domain=? ORDER BY project_name', (domain,)).fetchall()
     result = [_project_with_bins(conn, p) for p in projects]
     conn.close()
     return jsonify(result)
 
 
 @app.route('/api/projects', methods=['POST'])
+@login_required
 def add_project():
-    d = request.json or {}
-    name = d.get('project_name', '').strip()
+    d      = request.json or {}
+    name   = d.get('project_name', '').strip()
+    domain = session['domain']
     if not name:
         return jsonify({'error': 'Project name required'}), 400
     conn = get_db()
     try:
         conn.execute(
-            'INSERT INTO projects (project_name,address,borough,notes) VALUES (?,?,?,?)',
-            (name, d.get('address', ''), d.get('borough', ''), d.get('notes', ''))
+            'INSERT INTO projects (project_name,address,borough,notes,domain) VALUES (?,?,?,?,?)',
+            (name, d.get('address', ''), d.get('borough', ''), d.get('notes', ''), domain)
         )
         conn.commit()
         project_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
@@ -1280,8 +1453,10 @@ def add_project():
 
 
 @app.route('/api/projects/<int:project_id>', methods=['PUT'])
+@login_required
 def update_project(project_id):
-    d = request.json or {}
+    d      = request.json or {}
+    domain = session['domain']
     sets, vals = [], []
     for f in ['project_name', 'address', 'borough', 'notes']:
         if f in d:
@@ -1289,26 +1464,33 @@ def update_project(project_id):
             vals.append(d[f])
     if not sets:
         return jsonify({'error': 'Nothing to update'}), 400
-    vals.append(project_id)
+    vals.extend([project_id, domain])
     conn = get_db()
-    conn.execute(f'UPDATE projects SET {", ".join(sets)} WHERE id=?', vals)
+    conn.execute(f'UPDATE projects SET {", ".join(sets)} WHERE id=? AND domain=?', vals)
     conn.commit()
     conn.close()
     return jsonify({'success': True})
 
 
 @app.route('/api/projects/<int:project_id>', methods=['DELETE'])
+@login_required
 def delete_project(project_id):
-    conn = get_db()
+    domain = session['domain']
+    conn   = get_db()
+    project = conn.execute('SELECT id FROM projects WHERE id=? AND domain=?', (project_id, domain)).fetchone()
+    if not project:
+        conn.close()
+        return jsonify({'error': 'Project not found'}), 404
     conn.execute('DELETE FROM tco_items   WHERE project_id=?', (project_id,))
     conn.execute('DELETE FROM project_bins WHERE project_id=?', (project_id,))
-    conn.execute('DELETE FROM projects    WHERE id=?',          (project_id,))
+    conn.execute('DELETE FROM projects    WHERE id=? AND domain=?', (project_id, domain))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
 
 
 @app.route('/api/projects/<int:project_id>/bins', methods=['POST'])
+@login_required
 def add_bin(project_id):
     d = request.json or {}
     bin_num = str(d.get('bin', '')).strip()
@@ -1332,6 +1514,7 @@ def add_bin(project_id):
 
 
 @app.route('/api/projects/<int:project_id>/bins/<path:bin_num>', methods=['PUT'])
+@login_required
 def update_bin(project_id, bin_num):
     d = request.json or {}
     new_bin = str(d.get('bin', bin_num)).strip()
@@ -1350,6 +1533,7 @@ def update_bin(project_id, bin_num):
 
 
 @app.route('/api/projects/<int:project_id>/bins/<path:bin_num>', methods=['DELETE'])
+@login_required
 def remove_bin(project_id, bin_num):
     conn = get_db()
     count = conn.execute(
@@ -1365,10 +1549,12 @@ def remove_bin(project_id, bin_num):
 
 
 @app.route('/api/projects/<int:project_id>/report')
+@login_required
 def get_project_report(project_id):
     """Aggregate DOB NOW + BIS permits + DOT permits + violations across all project BINs."""
-    conn = get_db()
-    project  = conn.execute('SELECT * FROM projects WHERE id=?', (project_id,)).fetchone()
+    domain = session['domain']
+    conn   = get_db()
+    project  = conn.execute('SELECT * FROM projects WHERE id=? AND domain=?', (project_id, domain)).fetchone()
     bins     = conn.execute(
         'SELECT * FROM project_bins WHERE project_id=? ORDER BY is_primary DESC', (project_id,)
     ).fetchall()
@@ -1489,6 +1675,7 @@ def get_project_report(project_id):
 
 
 @app.route('/api/projects/<int:project_id>/tco_items', methods=['POST'])
+@login_required
 def add_tco_item(project_id):
     d = request.json or {}
     if not d.get('description', '').strip():
@@ -1513,6 +1700,7 @@ def add_tco_item(project_id):
 
 
 @app.route('/api/tco_items/<int:item_id>', methods=['PUT'])
+@login_required
 def update_tco_item(item_id):
     d = request.json or {}
     sets, vals = [], []
@@ -1532,6 +1720,7 @@ def update_tco_item(item_id):
 
 
 @app.route('/api/tco_items/<int:item_id>', methods=['DELETE'])
+@login_required
 def delete_tco_item(item_id):
     conn = get_db()
     conn.execute('DELETE FROM tco_items WHERE id=?', (item_id,))
@@ -1541,10 +1730,12 @@ def delete_tco_item(item_id):
 
 
 @app.route('/api/cache/status')
+@login_required
 def cache_status():
     """Return age (seconds) of each cached dataset."""
-    conn = get_db()
-    rows = conn.execute('SELECT source, fetched_at FROM violation_cache').fetchall()
+    domain = session['domain']
+    conn   = get_db()
+    rows   = conn.execute('SELECT source, fetched_at FROM violation_cache WHERE domain=?', (domain,)).fetchall()
     conn.close()
     result = {}
     for row in rows:
@@ -1558,29 +1749,31 @@ def cache_status():
 
 
 @app.route('/api/changes/count')
+@login_required
 def get_changes_count():
     """Return count of change events detected in the last 7 days (for badge display)."""
-    from datetime import timedelta
+    domain = session['domain']
     cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
-    conn = get_db()
-    row  = conn.execute(
-        'SELECT COUNT(*) AS cnt FROM violation_changes WHERE detected_at >= ?', (cutoff,)
+    conn   = get_db()
+    row    = conn.execute(
+        'SELECT COUNT(*) AS cnt FROM violation_changes WHERE domain=? AND detected_at >= ?', (domain, cutoff)
     ).fetchone()
     conn.close()
     return jsonify({'count': row['cnt'] if row else 0})
 
 
 @app.route('/api/changes')
+@login_required
 def get_changes():
     """Return recent change log entries, newest first."""
-    from datetime import timedelta
+    domain = session['domain']
     days   = int(request.args.get('days', 7))
     cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
     conn   = get_db()
     rows   = conn.execute(
         'SELECT id, detected_at, source, record_id, change_type, old_value, new_value, address, description '
-        'FROM violation_changes WHERE detected_at >= ? ORDER BY detected_at DESC LIMIT 500',
-        (cutoff,)
+        'FROM violation_changes WHERE domain=? AND detected_at >= ? ORDER BY detected_at DESC LIMIT 500',
+        (domain, cutoff)
     ).fetchall()
     conn.close()
     return jsonify({
@@ -1591,6 +1784,7 @@ def get_changes():
 
 
 @app.route('/api/email_config', methods=['GET'])
+@login_required
 def get_email_config():
     conn = get_db()
     row  = conn.execute('SELECT * FROM email_config WHERE id=1').fetchone()
@@ -1604,6 +1798,7 @@ def get_email_config():
 
 
 @app.route('/api/email_config', methods=['POST'])
+@login_required
 def save_email_config():
     d    = request.json or {}
     conn = get_db()
@@ -1623,6 +1818,7 @@ def save_email_config():
 
 
 @app.route('/api/send_digest', methods=['POST'])
+@login_required
 def api_send_digest():
     """Manually trigger a digest email (for testing)."""
     ok, msg = send_digest()
@@ -1630,33 +1826,43 @@ def api_send_digest():
 
 
 @app.route('/api/settings', methods=['GET'])
+@login_required
 def get_app_settings():
-    conn = get_db()
-    rows = conn.execute('SELECT key, value FROM app_settings').fetchall()
+    domain = session['domain']
+    conn   = get_db()
+    rows   = conn.execute('SELECT key, value FROM app_settings WHERE domain=?', (domain,)).fetchall()
     conn.close()
     settings = {r['key']: r['value'] for r in rows}
     return jsonify({
-        'company_name': settings.get('company_name', 'VOREA CONSTRUCTION'),
-        'search_term':  settings.get('search_term',  'VOREA'),
+        'company_name': settings.get('company_name', session.get('company_name', 'VOREA')),
+        'search_term':  settings.get('search_term',  session.get('search_term', 'VOREA')),
+        'user_email':   session.get('email', ''),
+        'domain':       domain,
     })
 
 
 @app.route('/api/settings', methods=['POST'])
+@login_required
 def save_app_settings():
-    d = request.json or {}
-    conn = get_db()
+    d      = request.json or {}
+    domain = session['domain']
+    conn   = get_db()
     for key in ['company_name', 'search_term']:
         if key in d:
             conn.execute(
-                'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
-                (key, str(d[key]).strip())
+                'INSERT OR REPLACE INTO app_settings (key, domain, value) VALUES (?,?,?)',
+                (key, domain, str(d[key]).strip())
             )
-    # Clear violation_cache so the next /api/all forces a fresh fetch with the new search term
-    conn.execute('DELETE FROM violation_cache')
+    # If search_term changed, update session and clear this domain's cache
+    if 'search_term' in d:
+        session['search_term'] = str(d['search_term']).strip()
+        conn.execute('DELETE FROM violation_cache WHERE domain=?', (domain,))
+    if 'company_name' in d:
+        session['company_name'] = str(d['company_name']).strip()
     conn.commit()
     conn.close()
-    logger.info("Settings updated — company_name=%s, search_term=%s; cache cleared",
-                d.get('company_name'), d.get('search_term'))
+    logger.info("Settings updated [%s] — company_name=%s, search_term=%s",
+                domain, d.get('company_name'), d.get('search_term'))
     return jsonify({'success': True})
 
 

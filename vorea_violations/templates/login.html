@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In — Violation Tracker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d0f12;
+      --surface: #141720;
+      --surface2:#1c2030;
+      --border:  #252c3d;
+      --accent:  #f5c518;
+      --text:    #e8eaf0;
+      --text-muted: #7a8299;
+      --error:   #e53e3e;
+      --success: #38a169;
+      --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --radius: 8px;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:      #f0f4f8;
+        --surface: #ffffff;
+        --surface2:#f5f7fa;
+        --border:  #c8d0dc;
+        --accent:  #d4a000;
+        --text:    #111827;
+        --text-muted: #6b7280;
+      }
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.3);
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .logo-name {
+      font-family: var(--font-mono);
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .logo-sub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .tab-row {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.75rem;
+    }
+
+    .tab-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      padding: .6rem 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color .15s, border-color .15s;
+    }
+
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .form-group { margin-bottom: 1.1rem; }
+
+    .form-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .form-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .65rem .85rem;
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      outline: none;
+      transition: border-color .15s;
+    }
+
+    .form-input:focus { border-color: var(--accent); }
+
+    .btn-primary {
+      width: 100%;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: var(--radius);
+      padding: .75rem;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      margin-top: .5rem;
+      transition: opacity .15s;
+    }
+
+    .btn-primary:hover { opacity: .88; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    .error-msg {
+      background: rgba(229, 62, 62, .12);
+      border: 1px solid var(--error);
+      border-radius: var(--radius);
+      color: var(--error);
+      font-size: 13px;
+      padding: .6rem .85rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+
+    .success-msg {
+      background: rgba(56, 161, 105, .12);
+      border: 1px solid var(--success);
+      border-radius: var(--radius);
+      color: var(--success);
+      font-size: 13px;
+      padding: .6rem .85rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 1.25rem;
+      line-height: 1.6;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(0,0,0,.3);
+      border-top-color: #000;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="logo-name">Violation Tracker</div>
+      <div class="logo-sub">NYC DOB · OATH · DOT</div>
+    </div>
+
+    <div class="tab-row">
+      <button class="tab-btn" id="tabLogin" onclick="showTab('login')">Sign In</button>
+      <button class="tab-btn" id="tabRegister" onclick="showTab('register')">Create Account</button>
+    </div>
+
+    <div id="errorMsg" class="error-msg"></div>
+    <div id="successMsg" class="success-msg"></div>
+
+    <!-- LOGIN FORM -->
+    <div id="loginForm">
+      <div class="form-group">
+        <label class="form-label" for="loginEmail">Email</label>
+        <input class="form-input" type="email" id="loginEmail" placeholder="you@yourcompany.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="loginPassword">Password</label>
+        <input class="form-input" type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="btn-primary" id="loginBtn" onclick="doLogin()">Sign In</button>
+    </div>
+
+    <!-- REGISTER FORM -->
+    <div id="registerForm" style="display:none">
+      <div class="form-group">
+        <label class="form-label" for="regEmail">Work Email</label>
+        <input class="form-input" type="email" id="regEmail" placeholder="you@yourcompany.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="regPassword">Password</label>
+        <input class="form-input" type="password" id="regPassword" placeholder="Min. 8 characters" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="regConfirm">Confirm Password</label>
+        <input class="form-input" type="password" id="regConfirm" placeholder="Re-enter password" autocomplete="new-password">
+      </div>
+      <button class="btn-primary" id="registerBtn" onclick="doRegister()">Create Account</button>
+      <p class="hint">Only authorized company domains can register.<br>Contact your administrator if your domain isn't recognized.</p>
+    </div>
+  </div>
+
+  <script>
+    // Determine initial mode from URL param
+    const urlParams = new URLSearchParams(window.location.search);
+    const initMode  = urlParams.get('mode') === 'register' ? 'register' : 'login';
+    showTab(initMode);
+
+    function showTab(mode) {
+      document.getElementById('loginForm').style.display    = mode === 'login'    ? '' : 'none';
+      document.getElementById('registerForm').style.display = mode === 'register' ? '' : 'none';
+      document.getElementById('tabLogin').classList.toggle('active',    mode === 'login');
+      document.getElementById('tabRegister').classList.toggle('active', mode === 'register');
+      clearMessages();
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('errorMsg');
+      el.textContent = msg;
+      el.style.display = 'block';
+      document.getElementById('successMsg').style.display = 'none';
+    }
+
+    function showSuccess(msg) {
+      const el = document.getElementById('successMsg');
+      el.textContent = msg;
+      el.style.display = 'block';
+      document.getElementById('errorMsg').style.display = 'none';
+    }
+
+    function clearMessages() {
+      document.getElementById('errorMsg').style.display   = 'none';
+      document.getElementById('successMsg').style.display = 'none';
+    }
+
+    function setLoading(btnId, loading) {
+      const btn = document.getElementById(btnId);
+      if (loading) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Please wait…';
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = btnId === 'loginBtn' ? 'Sign In' : 'Create Account';
+      }
+    }
+
+    async function doLogin() {
+      clearMessages();
+      const email    = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      if (!email || !password) { showError('Email and password are required.'); return; }
+      setLoading('loginBtn', true);
+      try {
+        const res  = await fetch('/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email, password})
+        });
+        const data = await res.json();
+        if (data.ok) {
+          window.location.href = '/';
+        } else {
+          showError(data.error || 'Login failed. Please try again.');
+        }
+      } catch(e) {
+        showError('Connection error. Please try again.');
+      }
+      setLoading('loginBtn', false);
+    }
+
+    async function doRegister() {
+      clearMessages();
+      const email    = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+      const confirm  = document.getElementById('regConfirm').value;
+      if (!email || !password) { showError('Email and password are required.'); return; }
+      if (password.length < 8)  { showError('Password must be at least 8 characters.'); return; }
+      if (password !== confirm)  { showError('Passwords do not match.'); return; }
+      setLoading('registerBtn', true);
+      try {
+        const res  = await fetch('/register', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email, password, confirm})
+        });
+        const data = await res.json();
+        if (data.ok) {
+          window.location.href = '/';
+        } else {
+          showError(data.error || 'Registration failed. Please try again.');
+        }
+      } catch(e) {
+        showError('Connection error. Please try again.');
+      }
+      setLoading('registerBtn', false);
+    }
+
+    // Allow Enter key to submit
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      const loginVisible = document.getElementById('loginForm').style.display !== 'none';
+      if (loginVisible) doLogin(); else doRegister();
+    });
+  </script>
+</body>
+</html>

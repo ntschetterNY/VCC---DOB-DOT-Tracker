@@ -1007,7 +1007,7 @@
   <div class="logo">
     <div class="logo-mark">V</div>
     <div>
-      <div class="logo-text">VOREA CONSTRUCTION</div>
+      <div class="logo-text">{{ company_name }}</div>
       <div class="logo-sub">Violation Tracking System</div>
     </div>
   </div>
@@ -1039,6 +1039,7 @@
     <button class="btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark theme">☀️</button>
     <button class="btn" id="changesBtn" onclick="openChangesPanel()" title="Recent changes">🔔<span id="changesBadge" class="changes-badge" style="display:none"></span></button>
     <button class="btn" id="settingsBtn" onclick="openSettingsModal()" title="Settings">⚙️</button>
+    <a href="/logout" class="btn" title="Sign out ({{ user_email }})" style="text-decoration:none">⏻</a>
   </div>
 </header>
 
@@ -1652,10 +1653,10 @@ const COL_LABELS = {
 
 // ── FETCH ──────────────────────────────────────────────────────────────────
 async function fetchAll() {
-  const search = currentSearchTerm || 'VOREA';
   showLoader();
   try {
-    const res = await fetch(`/api/all?search=${encodeURIComponent(search)}`);
+    const res = await fetch('/api/all');
+    if (res.status === 401) { window.location.href = '/login'; return; }
     const json = await res.json();
 
     allData = json.results;
@@ -3584,6 +3585,7 @@ async function saveSettings() {
 async function loadSettings() {
   try {
     const res  = await fetch('/api/settings');
+    if (res.status === 401) { window.location.href = '/login'; return; }
     const json = await res.json();
     if (json.company_name) document.querySelector('.logo-text').textContent = json.company_name;
     if (json.search_term)  currentSearchTerm = json.search_term;
