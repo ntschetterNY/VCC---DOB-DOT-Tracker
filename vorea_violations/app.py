@@ -1299,8 +1299,8 @@ def save_app_settings():
     return jsonify({'success': True})
 
 
-# ─── APScheduler startup ──────────────────────────────────────────────────────
-if HAS_SCHEDULER:
+# ─── APScheduler startup (disabled on Vercel — no background threads in serverless) ──
+if HAS_SCHEDULER and not os.environ.get('VERCEL'):
     _sched = BackgroundScheduler(daemon=True)
     _sched.add_job(refresh_all_cache, 'interval', minutes=10, id='cache_refresh',
                    max_instances=1, coalesce=True)
