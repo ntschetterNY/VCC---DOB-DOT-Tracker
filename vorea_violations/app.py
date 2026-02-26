@@ -11,6 +11,15 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 
+try:
+    import psycopg2
+    import psycopg2.extras
+    HAS_PG = True
+    _INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg2.IntegrityError)
+except ImportError:
+    HAS_PG = False
+    _INTEGRITY_ERRORS = (sqlite3.IntegrityError,)
+
 # ─── Logging setup ────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -123,14 +132,149 @@ DATASETS = {
 
 BASE_URL = "https://data.cityofnewyork.us/resource"
 
-# ─── LOCAL PROJECT DATABASE ──────────────────────────────────────────────────
-# On Vercel the file system is read-only except /tmp; data is ephemeral there.
-if os.environ.get('VERCEL'):
-    DB_PATH = '/tmp/projects.db'
-else:
-    DB_PATH = os.path.join(os.path.dirname(__file__), 'projects.db')
+# ─── DATABASE ABSTRACTION (SQLite locally, Postgres on Vercel) ───────────────
+DB_PATH = os.path.join(os.path.dirname(__file__), 'projects.db')
+
+# Tables that have a SERIAL/AUTOINCREMENT primary key named 'id'
+_PG_SERIAL_TABLES = {'projects', 'project_bins', 'tco_items'}
+
+# ON CONFLICT clauses for each upsert table
+_PG_UPSERT = {
+    'violation_cache': 'ON CONFLICT (source) DO UPDATE SET data_json=EXCLUDED.data_json, fetched_at=EXCLUDED.fetched_at, search_term=EXCLUDED.search_term',
+    'email_config':    'ON CONFLICT (id) DO UPDATE SET recipient=EXCLUDED.recipient, frequency=EXCLUDED.frequency, threshold=EXCLUDED.threshold, sources=EXCLUDED.sources, smtp_user=EXCLUDED.smtp_user, smtp_pass=EXCLUDED.smtp_pass',
+    'app_settings':    'ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
+}
+
+def _pg_table(sql):
+    import re
+    m = re.search(r'(?:INTO|UPDATE|FROM)\s+(\w+)', sql, re.IGNORECASE)
+    return m.group(1).lower() if m else ''
+
+class _FakeRow:
+    """Row-like object supporting both row[0] and row['key'] — used for last_insert_rowid()."""
+    def __init__(self, val):
+        self._val = val
+    def __getitem__(self, key):
+        return self._val
+
+class _DictRow:
+    """Wraps a psycopg2 RealDictRow to also support integer index access (like sqlite3.Row)."""
+    def __init__(self, row):
+        self._row  = row
+        self._vals = list(row.values()) if row else []
+    def __getitem__(self, key):
+        return self._vals[key] if isinstance(key, int) else self._row[key]
+    def get(self, key, default=None):
+        return self._row.get(key, default)
+    def __bool__(self):
+        return bool(self._row)
+    def keys(self):
+        return self._row.keys()
+
+class _PgConn:
+    """Thin wrapper around psycopg2 that mimics the sqlite3 connection interface."""
+
+    def __init__(self, pg_conn):
+        self._conn = pg_conn
+        self._cur  = pg_conn.cursor()
+        self._lastrowid_val = None
+        self._fake_row = None
+
+    @staticmethod
+    def _to_pg(sql):
+        s = sql.replace('?', '%s')
+        s = s.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
+        return s
+
+    def execute(self, sql, params=()):
+        pg_sql = self._to_pg(sql.strip())
+        upper  = pg_sql.upper().lstrip()
+        self._fake_row = None
+
+        # SELECT last_insert_rowid() → return stored id without hitting DB
+        if 'LAST_INSERT_ROWID' in upper:
+            self._fake_row = _FakeRow(self._lastrowid_val)
+            return self
+
+        # PRAGMA table_info → information_schema (used in init_db migration check)
+        if upper.startswith('PRAGMA'):
+            table = sql.split('(')[1].strip().rstrip(')')
+            pg_sql = (f"SELECT column_name AS name FROM information_schema.columns "
+                      f"WHERE table_name = '{table.lower()}'")
+            self._cur.execute(pg_sql)
+            return self
+
+        # INSERT OR REPLACE → upsert
+        if 'INSERT OR REPLACE' in upper:
+            pg_sql = pg_sql.replace('OR REPLACE ', '', 1).replace('or replace ', '', 1)
+            pg_sql += ' ' + _PG_UPSERT.get(_pg_table(pg_sql), 'ON CONFLICT DO NOTHING')
+
+        # INSERT OR IGNORE → do nothing on conflict
+        elif 'INSERT OR IGNORE' in upper:
+            pg_sql = pg_sql.replace('OR IGNORE ', '', 1).replace('or ignore ', '', 1)
+            pg_sql += ' ON CONFLICT DO NOTHING'
+
+        # Auto-add RETURNING id for serial tables so lastrowid works
+        is_insert = upper.startswith('INSERT')
+        table = _pg_table(pg_sql) if is_insert else ''
+        if is_insert and table in _PG_SERIAL_TABLES and 'RETURNING' not in upper:
+            pg_sql += ' RETURNING id'
+
+        self._cur.execute(pg_sql, params if params else None)
+
+        if is_insert and table in _PG_SERIAL_TABLES:
+            try:
+                row = self._cur.fetchone()
+                if row:
+                    self._lastrowid_val = row.get('id') or list(row.values())[0]
+            except Exception:
+                pass
+
+        return self
+
+    def executemany(self, sql, params_list):
+        for p in params_list:
+            self.execute(sql, p)
+        return self
+
+    def executescript(self, script):
+        for stmt in script.split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                try:
+                    self._cur.execute(self._to_pg(stmt))
+                except Exception as e:
+                    logger.debug("executescript stmt skipped: %s", e)
+
+    def fetchone(self):
+        if self._fake_row is not None:
+            r, self._fake_row = self._fake_row, None
+            return r
+        row = self._cur.fetchone()
+        return _DictRow(row) if row is not None else None
+
+    def fetchall(self):
+        return [_DictRow(r) for r in (self._cur.fetchall() or [])]
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+    @property
+    def lastrowid(self):
+        return self._lastrowid_val
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
 
 def get_db():
+    db_url = os.environ.get('DATABASE_URL')
+    if db_url and HAS_PG:
+        pg = psycopg2.connect(db_url, cursor_factory=psycopg2.extras.RealDictCursor)
+        return _PgConn(pg)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -140,7 +284,6 @@ def _migrate_v1_to_v2(conn):
     conn.executescript('''
         ALTER TABLE projects  RENAME TO _projects_v1;
         ALTER TABLE tco_items RENAME TO _tco_items_v1;
-
         CREATE TABLE projects (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             project_name TEXT NOT NULL,
@@ -173,123 +316,182 @@ def _migrate_v1_to_v2(conn):
             updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects(id)
         );
-
         INSERT INTO projects (project_name, address, borough, notes, created_at)
         SELECT project_name, address, borough, notes, created_at FROM _projects_v1;
-
         INSERT INTO project_bins (project_id, bin, dob_job_number, is_primary)
         SELECT p.id, o.bin, o.dob_job_number, 1
         FROM projects p JOIN _projects_v1 o ON p.project_name = o.project_name;
-
         INSERT INTO tco_items (project_id, section, item_ref, description,
                                responsible_party, status, notes, created_at, updated_at)
         SELECT pb.project_id, ti.section, ti.item_ref, ti.description,
                ti.responsible_party, ti.status, ti.notes, ti.created_at, ti.updated_at
         FROM _tco_items_v1 ti JOIN project_bins pb ON pb.bin = ti.bin;
-
         DROP TABLE _projects_v1;
         DROP TABLE _tco_items_v1;
     ''')
     conn.commit()
 
-def init_db():
-    """Create or migrate to the multi-BIN schema."""
-    conn = get_db()
-    try:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
-    except Exception:
-        cols = []
 
-    if cols and 'bin' in cols and 'id' not in cols:
-        # Old single-BIN schema — migrate
-        _migrate_v1_to_v2(conn)
-    else:
-        # Fresh install or already on new schema
-        conn.executescript('''
-            CREATE TABLE IF NOT EXISTS projects (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_name TEXT NOT NULL,
-                address      TEXT DEFAULT '',
-                borough      TEXT DEFAULT '',
-                notes        TEXT DEFAULT '',
-                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS project_bins (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id     INTEGER NOT NULL,
-                bin            TEXT NOT NULL,
-                label          TEXT DEFAULT '',
-                dob_job_number TEXT DEFAULT '',
-                is_primary     INTEGER DEFAULT 1,
-                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(project_id, bin),
-                FOREIGN KEY (project_id) REFERENCES projects(id)
-            );
-            CREATE TABLE IF NOT EXISTS tco_items (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id        INTEGER NOT NULL,
-                section           TEXT NOT NULL,
-                item_ref          TEXT DEFAULT '',
-                description       TEXT NOT NULL,
-                responsible_party TEXT DEFAULT '',
-                status            TEXT DEFAULT 'open',
-                notes             TEXT DEFAULT '',
-                created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (project_id) REFERENCES projects(id)
-            );
-            CREATE TABLE IF NOT EXISTS violation_cache (
-                source      TEXT PRIMARY KEY,
-                data_json   TEXT,
-                fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                search_term TEXT DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key   TEXT PRIMARY KEY,
-                value TEXT DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS email_config (
-                id         INTEGER PRIMARY KEY,
-                recipient  TEXT DEFAULT '',
-                frequency  TEXT DEFAULT 'daily',
-                threshold  TEXT DEFAULT 'all',
-                sources    TEXT DEFAULT '[]',
-                last_sent  TIMESTAMP,
-                smtp_user  TEXT DEFAULT '',
-                smtp_pass  TEXT DEFAULT ''
-            );
-        ''')
+_PG_SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS projects (
+        id           SERIAL PRIMARY KEY,
+        project_name TEXT NOT NULL,
+        address      TEXT DEFAULT '',
+        borough      TEXT DEFAULT '',
+        notes        TEXT DEFAULT '',
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+    """CREATE TABLE IF NOT EXISTS project_bins (
+        id             SERIAL PRIMARY KEY,
+        project_id     INTEGER NOT NULL,
+        bin            TEXT NOT NULL,
+        label          TEXT DEFAULT '',
+        dob_job_number TEXT DEFAULT '',
+        is_primary     INTEGER DEFAULT 1,
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_id, bin),
+        FOREIGN KEY (project_id) REFERENCES projects(id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS tco_items (
+        id                SERIAL PRIMARY KEY,
+        project_id        INTEGER NOT NULL,
+        section           TEXT NOT NULL,
+        item_ref          TEXT DEFAULT '',
+        description       TEXT NOT NULL,
+        responsible_party TEXT DEFAULT '',
+        status            TEXT DEFAULT 'open',
+        notes             TEXT DEFAULT '',
+        created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS violation_cache (
+        source      TEXT PRIMARY KEY,
+        data_json   TEXT,
+        fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        search_term TEXT DEFAULT ''
+    )""",
+    """CREATE TABLE IF NOT EXISTS app_settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT DEFAULT ''
+    )""",
+    """CREATE TABLE IF NOT EXISTS email_config (
+        id         INTEGER PRIMARY KEY,
+        recipient  TEXT DEFAULT '',
+        frequency  TEXT DEFAULT 'daily',
+        threshold  TEXT DEFAULT 'all',
+        sources    TEXT DEFAULT '[]',
+        last_sent  TIMESTAMP,
+        smtp_user  TEXT DEFAULT '',
+        smtp_pass  TEXT DEFAULT ''
+    )""",
+]
+
+
+def _seed_projects(conn):
+    """Insert default projects/BINs when the projects table is empty."""
+    count = conn.execute("SELECT COUNT(*) AS cnt FROM projects").fetchone()['cnt']
+    if count == 0:
+        c1   = conn.execute("INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
+                            ('1940 Jerome Ave', '1940 Jerome Ave', 'Bronx'))
+        pid1 = c1.lastrowid
+        c2   = conn.execute("INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
+                            ('291 Livingston', '291 Livingston St', 'Brooklyn'))
+        pid2 = c2.lastrowid
+        conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2008251','',1))
+        conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2129813','1940J - New BIN',0))
+        conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid2,'3000479','291L',1))
         conn.commit()
-        # Migrate: add search_term column to violation_cache if missing (existing DBs)
-        try:
-            conn.execute("ALTER TABLE violation_cache ADD COLUMN search_term TEXT DEFAULT ''")
-            conn.commit()
-        except Exception:
-            pass  # Column already exists
-        # Migrate: add app_settings table if missing (existing DBs)
-        try:
-            conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT DEFAULT '')")
-            conn.commit()
-        except Exception:
-            pass
+        logger.info("Seeded default projects (fresh DB)")
 
-    # ── Seed default projects if DB is empty (e.g. fresh Vercel cold start) ──
-    try:
-        count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
-        if count == 0:
-            c1 = conn.execute(
-                "INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
-                ('1940 Jerome Ave', '1940 Jerome Ave', 'Bronx'))
-            pid1 = c1.lastrowid
-            c2 = conn.execute(
-                "INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
-                ('291 Livingston', '291 Livingston St', 'Brooklyn'))
-            pid2 = c2.lastrowid
-            conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2008251','',1))
-            conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2129813','1940J - New BIN',0))
-            conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid2,'3000479','291L',1))
+
+def init_db():
+    """Create or migrate schema, then seed default data if empty."""
+    conn = get_db()
+
+    if os.environ.get('DATABASE_URL') and HAS_PG:
+        # ── Postgres: create tables individually with Postgres syntax ──────────
+        for stmt in _PG_SCHEMA:
+            conn._cur.execute(stmt)
+        conn.commit()
+    else:
+        # ── SQLite: check for old v1 schema, migrate if needed ────────────────
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+        except Exception:
+            cols = []
+
+        if cols and 'bin' in cols and 'id' not in cols:
+            _migrate_v1_to_v2(conn)
+        else:
+            conn.executescript('''
+                CREATE TABLE IF NOT EXISTS projects (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_name TEXT NOT NULL,
+                    address      TEXT DEFAULT '',
+                    borough      TEXT DEFAULT '',
+                    notes        TEXT DEFAULT '',
+                    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS project_bins (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id     INTEGER NOT NULL,
+                    bin            TEXT NOT NULL,
+                    label          TEXT DEFAULT '',
+                    dob_job_number TEXT DEFAULT '',
+                    is_primary     INTEGER DEFAULT 1,
+                    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(project_id, bin),
+                    FOREIGN KEY (project_id) REFERENCES projects(id)
+                );
+                CREATE TABLE IF NOT EXISTS tco_items (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id        INTEGER NOT NULL,
+                    section           TEXT NOT NULL,
+                    item_ref          TEXT DEFAULT '',
+                    description       TEXT NOT NULL,
+                    responsible_party TEXT DEFAULT '',
+                    status            TEXT DEFAULT 'open',
+                    notes             TEXT DEFAULT '',
+                    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (project_id) REFERENCES projects(id)
+                );
+                CREATE TABLE IF NOT EXISTS violation_cache (
+                    source      TEXT PRIMARY KEY,
+                    data_json   TEXT,
+                    fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    search_term TEXT DEFAULT ''
+                );
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT DEFAULT ''
+                );
+                CREATE TABLE IF NOT EXISTS email_config (
+                    id         INTEGER PRIMARY KEY,
+                    recipient  TEXT DEFAULT '',
+                    frequency  TEXT DEFAULT 'daily',
+                    threshold  TEXT DEFAULT 'all',
+                    sources    TEXT DEFAULT '[]',
+                    last_sent  TIMESTAMP,
+                    smtp_user  TEXT DEFAULT '',
+                    smtp_pass  TEXT DEFAULT ''
+                );
+            ''')
             conn.commit()
-            logger.info("Seeded default projects (fresh DB)")
+            try:
+                conn.execute("ALTER TABLE violation_cache ADD COLUMN search_term TEXT DEFAULT ''")
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                conn.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT DEFAULT '')")
+                conn.commit()
+            except Exception:
+                pass
+
+    try:
+        _seed_projects(conn)
     except Exception as e:
         logger.warning("Seed skipped: %s", e)
 
@@ -1014,7 +1216,7 @@ def add_bin(project_id):
             (project_id, bin_num, d.get('label', ''), d.get('dob_job_number', ''))
         )
         conn.commit()
-    except sqlite3.IntegrityError:
+    except _INTEGRITY_ERRORS:
         conn.close()
         return jsonify({'error': f'BIN {bin_num} already in this project'}), 409
     except Exception as e:
