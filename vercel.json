@@ -1,0 +1,14 @@
+{
+  "builds": [
+    {
+      "src": "vorea_violations/app.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "vorea_violations/app.py"
+    }
+  ]
+}

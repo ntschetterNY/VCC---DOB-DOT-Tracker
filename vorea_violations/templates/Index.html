@@ -1,0 +1,3542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>VOREA — Violation Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --surface: #141720;
+      --surface2: #1c2130;
+      --border: #252c3d;
+      --accent: #f5c518;
+      --accent2: #3b82f6;
+      --text: #e8eaf0;
+      --text-dim: #7a8299;
+      --text-muted: #4a5168;
+      --open: #ef4444;
+      --pending: #f59e0b;
+      --resolved: #22c55e;
+      --dob: #ef4444;
+      --ecb: #f97316;
+      --dot: #3b82f6;
+      --dep: #22c55e;
+      --font-mono: 'Space Mono', monospace;
+      --font-sans: 'DM Sans', sans-serif;
+    }
+
+    /* ── LIGHT THEME ── */
+    [data-theme="light"] {
+      --bg: #f0f4f8;
+      --surface: #ffffff;
+      --surface2: #e8edf3;
+      --border: #c8d0dc;
+      --accent: #d4a000;
+      --accent2: #2563eb;
+      --text: #111827;
+      --text-dim: #374151;
+      --text-muted: #6b7280;
+      --open: #dc2626;
+      --pending: #d97706;
+      --resolved: #16a34a;
+    }
+
+    /* Hide scanline overlay in light mode */
+    [data-theme="light"] body::before { display: none; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Scanline overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+      );
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-mark {
+      width: 36px;
+      height: 36px;
+      background: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 14px;
+      color: #000;
+      clip-path: polygon(10% 0%, 100% 0%, 90% 100%, 0% 100%);
+    }
+
+    .logo-text {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--text);
+    }
+
+    .logo-sub {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .search-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 4px;
+    }
+
+    .search-wrap input {
+      background: none;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      width: 180px;
+    }
+
+    .search-wrap input::placeholder { color: var(--text-muted); }
+
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all 0.15s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .btn-accent {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .btn-accent:hover {
+      background: #e0b015;
+    }
+
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 10px;
+    }
+
+    /* ── MAIN LAYOUT ── */
+    .main {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: calc(100vh - 64px);
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem 0;
+      position: sticky;
+      top: 64px;
+      height: calc(100vh - 64px);
+      overflow-y: auto;
+    }
+
+    .sidebar-section {
+      padding: 0 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .sidebar-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+      padding: 0 0.5rem;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 2px;
+      border: 1px solid transparent;
+    }
+
+    .nav-item:hover {
+      background: var(--surface2);
+      border-color: var(--border);
+    }
+
+    .nav-item.active {
+      background: var(--surface2);
+      border-color: var(--border);
+    }
+
+    .nav-item-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .nav-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .nav-label {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .nav-count {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      background: var(--bg);
+      padding: 2px 7px;
+      border-radius: 20px;
+    }
+
+    /* Summary cards */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 0 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px;
+    }
+
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .stat-open .stat-value { color: var(--open); }
+    .stat-pending .stat-value { color: var(--pending); }
+    .stat-resolved .stat-value { color: var(--resolved); }
+    .stat-total .stat-value { color: var(--accent); }
+
+    /* ── CONTENT ── */
+    .content {
+      padding: 1.5rem 2rem;
+      overflow-x: auto;
+    }
+
+    .content-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+
+    .content-title {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .content-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .actions-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ── FILTER BAR ── */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.15s;
+      text-transform: uppercase;
+    }
+
+    .filter-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+    .filter-btn.active-all { background: var(--accent); color: #000; border-color: var(--accent); }
+    .filter-btn.active-open { background: var(--open); color: #fff; border-color: var(--open); }
+    .filter-btn.active-pending { background: var(--pending); color: #000; border-color: var(--pending); }
+    .filter-btn.active-resolved { background: var(--resolved); color: #000; border-color: var(--resolved); }
+
+    /* ── TABLE ── */
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    thead {
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 10px 14px;
+      text-align: left;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    th:hover { color: var(--text); }
+    th.sort-active { color: var(--accent); }
+    .sort-icon { opacity: 0.3; font-size: 8px; margin-left: 3px; }
+    th:hover .sort-icon { opacity: 0.7; }
+    th.sort-active .sort-icon { opacity: 1; color: var(--accent); }
+
+    /* ── BIN / PROJECT TRACKER ── */
+    .project-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 12px;
+    }
+    .project-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .project-card:hover { border-color: var(--accent); background: var(--surface); }
+    .project-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+    .project-name { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .project-address { font-size: 11px; color: var(--text-dim); }
+    .project-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .project-bin { font-family: var(--font-mono); font-size: 9px; background: var(--bg); color: var(--accent); padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border); }
+
+    /* Report tabs */
+    .report-tabs { display: flex; gap: 0; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
+    .report-tab {
+      font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 9px 14px; border: none; background: transparent;
+      color: var(--text-muted); cursor: pointer; transition: all 0.15s;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .report-tab:hover { color: var(--text); }
+    .report-tab.active-tab { color: var(--accent); border-bottom-color: var(--accent); }
+    .report-tab-content { padding-top: 8px; }
+
+    /* Stats bar inside BIN report */
+    .bin-stats-bar { display: flex; gap: 2rem; padding: 12px 0; margin-bottom: 1rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .bin-stat { display: flex; flex-direction: column; gap: 3px; }
+    .bin-stat-val { font-family: var(--font-mono); font-size: 22px; font-weight: 700; line-height: 1; }
+    .bin-stat-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
+    .bin-stat-open { color: var(--open); }
+    .bin-stat-resolved { color: var(--resolved); }
+
+    /* BIN report sections */
+    .bin-section { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 1rem; overflow: hidden; }
+    .bin-section-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; background: var(--surface2);
+      font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+    }
+    .bin-section-count { background: var(--bg); color: var(--accent); font-size: 9px; padding: 2px 7px; border-radius: 20px; }
+
+    /* Inline table inside BIN sections */
+    .bin-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .bin-table th {
+      font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-muted);
+      padding: 8px 12px; text-align: left; background: var(--surface);
+      border-bottom: 1px solid var(--border); cursor: default; user-select: none;
+      white-space: nowrap;
+    }
+    .bin-table th:hover { color: var(--text-muted); }
+    .bin-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); vertical-align: middle; }
+    .bin-table tr:last-child td { border-bottom: none; }
+    .bin-table tr:hover td { background: var(--surface2); color: var(--text); }
+
+    /* TCO checklist status select */
+    .tco-status-select {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text-dim); padding: 3px 7px; border-radius: 3px;
+      font-family: var(--font-mono); font-size: 9px; cursor: pointer;
+      outline: none; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .tco-status-select:focus { border-color: var(--accent); }
+
+    /* Closed / dismissed badge */
+    .badge-closed {
+      background: var(--surface2); color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    /* Filter pills (inline row above tables) */
+    .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .filter-pill {
+      font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 4px 12px; border-radius: 20px;
+      border: 1px solid var(--border); cursor: pointer;
+      background: transparent; color: var(--text-muted); transition: all 0.12s;
+    }
+    .filter-pill:hover { color: var(--text); border-color: var(--text-dim); }
+    .filter-pill.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+    /* Calendar */
+    .cal-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 1rem; }
+    .cal-month-label { font-family: var(--font-mono); font-size: 14px; font-weight: 700; flex: 1; text-align: center; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; }
+    .cal-dow { font-family: var(--font-mono); font-size: 9px; text-align: center; color: var(--text-muted); padding: 4px 0; text-transform: uppercase; letter-spacing: .1em; }
+    .cal-day { min-height: 68px; padding: 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface2); vertical-align: top; }
+    .cal-day.other-month { opacity: .3; }
+    .cal-day.today { border-color: var(--accent); }
+    .cal-day-num { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-bottom: 3px; }
+    .cal-dot { display: block; font-family: var(--font-mono); font-size: 9px; background: var(--accent); color: #000; border-radius: 3px; padding: 1px 5px; margin-top: 2px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cal-dot:hover { background: var(--text); }
+    .cal-agenda-group { margin-bottom: 1.25rem; }
+    .cal-agenda-date { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+
+    /* BIN chips */
+    .bin-chips-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .bin-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 20px; padding: 3px 10px;
+      font-family: var(--font-mono); font-size: 9px; color: var(--accent);
+    }
+    .bin-chip-primary { border-color: var(--accent); }
+    .bin-chip-label { color: var(--text-muted); font-family: var(--font-sans); font-size: 10px; margin-left: 2px; }
+    .bin-chip-btn {
+      background: none; border: none; cursor: pointer;
+      padding: 0 2px; color: var(--text-muted); font-size: 11px; line-height: 1;
+    }
+    .bin-chip-btn:hover { color: var(--text); }
+
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-dim);
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tr:hover td {
+      background: var(--surface2);
+      color: var(--text);
+    }
+
+    td.mono {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text);
+    }
+
+    /* Status badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .badge-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+    }
+
+    .badge-open {
+      background: rgba(239,68,68,0.12);
+      color: var(--open);
+      border: 1px solid rgba(239,68,68,0.25);
+    }
+    .badge-open .badge-dot { background: var(--open); }
+
+    .badge-pending {
+      background: rgba(245,158,11,0.12);
+      color: var(--pending);
+      border: 1px solid rgba(245,158,11,0.25);
+    }
+    .badge-pending .badge-dot { background: var(--pending); }
+
+    .badge-resolved {
+      background: rgba(34,197,94,0.12);
+      color: var(--resolved);
+      border: 1px solid rgba(34,197,94,0.25);
+    }
+    .badge-resolved .badge-dot { background: var(--resolved); }
+
+    /* Source tag */
+    .source-tag {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── LOADER ── */
+    .loader-wrap {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 4rem;
+    }
+
+    .loader-wrap.visible { display: flex; }
+
+    .loader {
+      display: flex;
+      gap: 6px;
+    }
+
+    .loader span {
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .loader span:nth-child(2) { animation-delay: 0.2s; }
+    .loader span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes pulse {
+      0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+      40% { transform: scale(1.1); opacity: 1; }
+    }
+
+    /* ── EMPTY / ERROR ── */
+    .empty-state {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 4rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    .empty-state.visible { display: flex; }
+
+    .empty-icon { font-size: 2.5rem; margin-bottom: 1rem; }
+
+    .empty-title {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 0.5rem;
+    }
+
+    .empty-sub { font-size: 12px; }
+
+    /* ── ALERT MODAL ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.visible { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2rem;
+      width: 480px;
+      max-width: 90vw;
+    }
+
+    .modal-title {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+      color: var(--accent);
+    }
+
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    .form-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .form-input:focus { border-color: var(--accent); }
+
+    .form-select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 1.5rem;
+    }
+
+    /* ── TOAST ── */
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--text);
+      z-index: 300;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s;
+      max-width: 320px;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .toast.success { border-left: 3px solid var(--resolved); }
+    .toast.error { border-left: 3px solid var(--open); }
+    .toast.info { border-left: 3px solid var(--accent); }
+
+    /* ── DETAIL PANEL ── */
+    .detail-panel {
+      display: none;
+      position: fixed;
+      right: 0;
+      top: 64px;
+      width: 420px;
+      height: calc(100vh - 64px);
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 1100;   /* above scanline overlay (1000) and header (100) */
+      overflow-y: auto;
+      padding: 1.5rem;
+      animation: slideIn 0.2s ease;
+      box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+    }
+
+    .detail-panel.visible { display: block; }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); }
+      to { transform: translateX(0); }
+    }
+
+    .detail-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+
+    .detail-id {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .detail-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .detail-close:hover { color: var(--text); }
+
+    .detail-row {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12.5px;
+    }
+
+    .detail-row:last-child { border-bottom: none; }
+
+    .detail-key {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding-top: 2px;
+    }
+
+    .detail-val {
+      color: var(--text);
+      word-break: break-word;
+      white-space: normal;
+    }
+
+    /* ── PAGINATION ── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .page-btns {
+      display: flex;
+      gap: 4px;
+    }
+
+    .page-btn {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-dim);
+      cursor: pointer;
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      transition: all 0.15s;
+    }
+
+    .page-btn:hover { background: var(--surface2); color: var(--text); }
+    .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+    .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    /* Last refresh */
+    .last-refresh {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--text-muted);
+      letter-spacing: 0.08em;
+    }
+
+    .live-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--resolved);
+      animation: livePulse 2s ease-in-out infinite;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<header>
+  <div class="logo">
+    <div class="logo-mark">V</div>
+    <div>
+      <div class="logo-text">VOREA CONSTRUCTION</div>
+      <div class="logo-sub">Violation Tracking System</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="search-wrap">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" id="searchInput" placeholder="Filter records…" oninput="applyClientFilter(this.value)">
+    </div>
+    <button class="btn btn-accent" onclick="fetchAll()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </svg>
+      Refresh All
+    </button>
+    <button class="btn" onclick="openAlertModal()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+      Alerts
+    </button>
+    <button class="btn" onclick="exportCSV('all')">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Export
+    </button>
+    <button class="btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark theme">☀️</button>
+    <button class="btn" id="settingsBtn" onclick="openSettingsModal()" title="Settings">⚙️</button>
+  </div>
+</header>
+
+<!-- ── MAIN ── -->
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Summary</div>
+      <div class="stat-grid">
+        <div class="stat-card stat-total">
+          <div class="stat-value" id="statTotal">—</div>
+          <div class="stat-label">Total</div>
+        </div>
+        <div class="stat-card stat-open">
+          <div class="stat-value" id="statOpen">—</div>
+          <div class="stat-label">Open</div>
+        </div>
+        <div class="stat-card stat-pending">
+          <div class="stat-value" id="statPending">—</div>
+          <div class="stat-label">Pending</div>
+        </div>
+        <div class="stat-card stat-resolved">
+          <div class="stat-value" id="statResolved">—</div>
+          <div class="stat-label">Resolved</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Data Sources</div>
+      <div id="navItems">
+        <div class="nav-item active" data-source="all" onclick="switchSource('all', this)">
+          <div class="nav-item-left">
+            <div class="nav-dot" style="background:#f5c518"></div>
+            <span class="nav-label">All Sources</span>
+          </div>
+          <span class="nav-count" id="count-all">—</span>
+        </div>
+        <div class="nav-item" data-source="DOB ECB Violations" onclick="switchSource('DOB ECB Violations', this)">
+          <div class="nav-item-left">
+            <div class="nav-dot" style="background:#f97316"></div>
+            <span class="nav-label">⚖️ ECB / OATH (DOB)</span>
+          </div>
+          <span class="nav-count" id="count-ecb">—</span>
+        </div>
+        <div class="nav-item" data-source="OATH Hearings (DOT / All Agencies)" onclick="switchSource('OATH Hearings (DOT / All Agencies)', this)">
+          <div class="nav-item-left">
+            <div class="nav-dot" style="background:#3b82f6"></div>
+            <span class="nav-label">🏛️ OATH / DOT Violations</span>
+          </div>
+          <span class="nav-count" id="count-oath">—</span>
+        </div>
+        <div class="nav-item" data-source="DOT Street Construction Permits" onclick="switchSource('DOT Street Construction Permits', this)">
+          <div class="nav-item-left">
+            <div class="nav-dot" style="background:#60a5fa"></div>
+            <span class="nav-label">🚧 DOT Permits</span>
+          </div>
+          <span class="nav-count" id="count-dot">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">BIN Tracker</div>
+      <div class="nav-item" data-source="projects" onclick="switchSource('projects', this)">
+        <div class="nav-item-left">
+          <div class="nav-dot" style="background:#a855f7"></div>
+          <span class="nav-label">🏗️ Project / TCO Tracker</span>
+        </div>
+        <span class="nav-count" id="count-projects">—</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Tools</div>
+      <div class="nav-item" data-source="calendar" onclick="switchSource('calendar', this)">
+        <div class="nav-item-left">
+          <div class="nav-dot" style="background:#06b6d4"></div>
+          <span class="nav-label">📅 Hearings Calendar</span>
+        </div>
+        <span class="nav-count" id="count-hearings">—</span>
+      </div>
+    </div>
+
+    <div style="padding: 0 1rem;">
+      <div class="last-refresh">
+        <span class="live-dot"></span>
+        <span id="lastRefresh">Not yet refreshed</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- CONTENT -->
+  <main class="content">
+    <div class="content-header">
+      <div>
+        <div class="content-title" id="contentTitle">All Violations</div>
+        <div class="content-meta" id="contentMeta">Select a source or refresh to load data</div>
+      </div>
+      <div class="actions-bar">
+        <button class="btn btn-sm" id="exportSourceBtn" onclick="exportCSV(currentSource)">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Export Source
+        </button>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-bar" id="filterBar">
+      <button class="filter-btn active-all" onclick="filterByStatus('all', this)">All</button>
+      <button class="filter-btn" onclick="filterByStatus('open', this)">Open</button>
+      <button class="filter-btn" onclick="filterByStatus('pending', this)">Pending</button>
+      <button class="filter-btn" onclick="filterByStatus('resolved', this)">Resolved</button>
+    </div>
+
+    <!-- Loader -->
+    <div class="loader-wrap" id="loader">
+      <div class="loader">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">📋</div>
+      <div class="empty-title">No violations found</div>
+      <div class="empty-sub">Click "Refresh All" to fetch data from NYC Open Data</div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap" id="tableWrap" style="display:none">
+      <table id="violationsTable">
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination" id="pagination" style="display:none">
+      <span id="pageInfo">Showing 1–50 of 0</span>
+      <div class="page-btns" id="pageBtns"></div>
+    </div>
+    <!-- ── BIN / PROJECT TRACKER VIEW ── -->
+    <div id="projectsView" style="display:none">
+
+      <!-- Project list -->
+      <div id="projectsList">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
+          <div>
+            <div class="content-title">🏗️ Project / TCO Tracker</div>
+            <div class="content-meta" id="projectsMeta">Add a project to begin tracking</div>
+          </div>
+          <button class="btn btn-accent" onclick="openAddProjectModal()">+ Add Project</button>
+        </div>
+        <div id="projectCards" class="project-cards"></div>
+      </div>
+
+      <!-- BIN Report (shown when a project is selected) -->
+      <div id="binReport" style="display:none">
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <button class="btn btn-sm" onclick="showProjectsList()">← Projects</button>
+              <div class="content-title" id="reportTitle">Loading…</div>
+            </div>
+            <div class="content-meta" id="reportMeta"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm" onclick="openEditProjectModal()">✏️ Edit Project</button>
+            <button class="btn btn-sm" onclick="refreshBINReport()">↺ Refresh</button>
+            <button class="btn btn-sm" onclick="deleteProject()" style="color:var(--open);border-color:rgba(239,68,68,.2)">✕ Delete</button>
+          </div>
+        </div>
+
+        <!-- BIN chips row -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;flex-wrap:wrap">
+          <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;white-space:nowrap">BINs:</span>
+          <div class="bin-chips-row" id="reportBINs" style="flex:1"></div>
+          <button class="btn btn-sm" onclick="openAddBINModal()" style="white-space:nowrap">+ Add BIN</button>
+        </div>
+
+        <!-- Tabs -->
+        <div class="report-tabs" id="reportTabs">
+          <button class="report-tab active-tab" onclick="showReportTab('tab-permits',this)">BIS Permits</button>
+          <button class="report-tab" onclick="showReportTab('tab-dot',this)">DOT Permits</button>
+          <button class="report-tab" onclick="showReportTab('tab-violations',this)">DOB Violations</button>
+          <button class="report-tab" onclick="showReportTab('tab-ecb',this)">ECB Violations</button>
+          <button class="report-tab" onclick="showReportTab('tab-complaints',this)">311 Complaints</button>
+          <button class="report-tab" onclick="showReportTab('tab-electrical',this)">Electrical</button>
+          <button class="report-tab" onclick="showReportTab('tab-elevator',this)">Elevator</button>
+          <button class="report-tab" onclick="showReportTab('tab-checklist',this)">TCO Checklist</button>
+        </div>
+        <div id="tab-permits"        class="report-tab-content"></div>
+        <div id="tab-dot"            class="report-tab-content" style="display:none"></div>
+        <div id="tab-violations"     class="report-tab-content" style="display:none"></div>
+        <div id="tab-ecb"            class="report-tab-content" style="display:none"></div>
+        <div id="tab-complaints"     class="report-tab-content" style="display:none"></div>
+        <div id="tab-electrical"     class="report-tab-content" style="display:none"></div>
+        <div id="tab-elevator"       class="report-tab-content" style="display:none"></div>
+        <div id="tab-checklist"      class="report-tab-content" style="display:none"></div>
+      </div>
+
+    </div><!-- /projectsView -->
+
+    <!-- ── HEARINGS CALENDAR VIEW ── -->
+    <div id="calendarView" style="display:none">
+      <!-- Header + view toggle -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="content-title">📅 Hearings Calendar</div>
+          <div class="content-meta" id="calendarMeta">Loading…</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm cal-view-btn active-tab" id="cal-view-grid" onclick="switchCalView('grid',this)">Monthly Grid</button>
+          <button class="btn btn-sm cal-view-btn" id="cal-view-agenda" onclick="switchCalView('agenda',this)">Agenda</button>
+          <button class="btn btn-sm cal-view-btn" id="cal-view-summary" onclick="switchCalView('summary',this)">📊 Summary</button>
+        </div>
+      </div>
+
+      <!-- Monthly grid sub-view -->
+      <div id="cal-grid-view">
+        <div class="cal-nav">
+          <button class="btn btn-sm" onclick="calMovMonth(-1)">← Prev</button>
+          <div class="cal-month-label" id="calMonthLabel"></div>
+          <button class="btn btn-sm" onclick="calMovMonth(0)">Today</button>
+          <button class="btn btn-sm" onclick="calMovMonth(1)">Next →</button>
+        </div>
+        <div class="cal-grid" id="calDowRow">
+          <div class="cal-dow">Sun</div><div class="cal-dow">Mon</div><div class="cal-dow">Tue</div>
+          <div class="cal-dow">Wed</div><div class="cal-dow">Thu</div><div class="cal-dow">Fri</div><div class="cal-dow">Sat</div>
+        </div>
+        <div class="cal-grid" id="calDaysGrid"></div>
+        <!-- Day detail panel -->
+        <div id="calDayDetail" style="display:none;margin-top:1rem">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:.75rem">
+            <span class="content-title" id="calDayTitle" style="font-size:13px"></span>
+            <button class="btn btn-sm" onclick="document.getElementById('calDayDetail').style.display='none'">✕</button>
+          </div>
+          <div id="calDayList"></div>
+        </div>
+      </div>
+
+      <!-- Agenda sub-view -->
+      <div id="cal-agenda-view" style="display:none">
+        <div id="calAgendaList"></div>
+      </div>
+
+      <!-- Summary sub-view -->
+      <div id="cal-summary-view" style="display:none">
+        <div id="calSummaryTable"></div>
+      </div>
+    </div><!-- /calendarView -->
+
+  </main>
+</div>
+
+<!-- ── DETAIL PANEL ── -->
+<div class="detail-panel" id="detailPanel">
+  <div class="detail-header">
+    <div>
+      <div class="detail-id" id="detailId">—</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px" id="detailSource">—</div>
+    </div>
+    <button class="detail-close" onclick="closeDetail()">✕</button>
+  </div>
+  <div id="detailRows"></div>
+</div>
+
+<!-- ── ALERT MODAL ── -->
+<div class="modal-overlay" id="alertModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">📧 Email Digest Configuration</div>
+
+    <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:8px">SMTP / M365 Credentials</div>
+    <div class="form-group">
+      <label class="form-label">M365 Sender Email (SMTP User)</label>
+      <input type="email" class="form-input" id="alertSmtpUser" placeholder="alerts@yourcompany.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">M365 App Password</label>
+      <input type="password" class="form-input" id="alertSmtpPass" placeholder="leave blank to keep existing">
+      <div style="font-size:10px;color:var(--text-muted);margin-top:3px">Stored securely in DB. Use an App Password if MFA is enabled.</div>
+    </div>
+
+    <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin:14px 0 10px;border-bottom:1px solid var(--border);padding-bottom:8px">Delivery Settings</div>
+    <div class="form-group">
+      <label class="form-label">Recipient Email</label>
+      <input type="email" class="form-input" id="alertEmail" placeholder="team@vorea.com">
+    </div>
+    <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <label class="form-label">Frequency</label>
+        <select class="form-select" id="alertFreq">
+          <option value="hourly">Hourly</option>
+          <option value="daily" selected>Daily Digest</option>
+          <option value="weekly">Weekly Summary</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Threshold</label>
+        <select class="form-select" id="alertThreshold">
+          <option value="all">All records</option>
+          <option value="open">Open only</option>
+          <option value="high">High priority</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Sources to Monitor</label>
+      <select class="form-select" multiple id="alertSources" style="height:90px">
+        <option value="DOB Violations" selected>DOB Violations</option>
+        <option value="DOB Safety Violations" selected>DOB Safety Violations</option>
+        <option value="DOB ECB Violations" selected>ECB / OATH (DOB)</option>
+        <option value="OATH Hearings (DOT / All Agencies)" selected>OATH Hearings (DOT & All)</option>
+        <option value="DOT Street Construction Permits" selected>DOT Permits</option>
+      </select>
+    </div>
+
+    <div id="alertStatus" style="display:none;font-size:11px;padding:8px 10px;border-radius:4px;margin-bottom:10px"></div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAlertModal()">Cancel</button>
+      <button class="btn" onclick="sendTestDigest()" style="color:var(--accent);border-color:var(--accent)">Send Test</button>
+      <button class="btn btn-accent" onclick="saveAlertConfig()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ADD PROJECT MODAL ── -->
+<div class="modal-overlay" id="addProjectModal">
+  <div class="modal">
+    <div class="modal-title">🏗️ New Project</div>
+    <div class="form-group">
+      <label class="form-label">Project Name *</label>
+      <input type="text" class="form-input" id="newProjectName" placeholder="e.g. 1940 Jerome Avenue">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Address</label>
+      <input type="text" class="form-input" id="newAddress" placeholder="e.g. 1940 Jerome Ave">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Borough</label>
+      <select class="form-select" id="newBorough">
+        <option value="">Select Borough</option>
+        <option value="Bronx">Bronx</option>
+        <option value="Brooklyn">Brooklyn</option>
+        <option value="Manhattan">Manhattan</option>
+        <option value="Queens">Queens</option>
+        <option value="Staten Island">Staten Island</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input type="text" class="form-input" id="newProjectNotes" placeholder="Optional">
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px">You can add BINs after creating the project.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddProjectModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="saveProject()">Create Project</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ADD TCO ITEM MODAL ── -->
+<div class="modal-overlay" id="addTCOItemModal">
+  <div class="modal">
+    <div class="modal-title">+ Add TCO Checklist Item</div>
+    <input type="hidden" id="tcoItemProjectId">
+    <div class="form-group">
+      <label class="form-label">Section</label>
+      <select class="form-select" id="tcoSection">
+        <option value="construction">Construction Signoff</option>
+        <option value="plumbing">Plumbing Signoff</option>
+        <option value="elevator">Elevator Signoff</option>
+        <option value="technical">Technical Reports (TRs / Special Inspections)</option>
+        <option value="bis">BIS Administrative</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Item Ref</label>
+      <input type="text" class="form-input" id="tcoItemRef" placeholder="e.g. 1.1, TR-A, BPP">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description *</label>
+      <input type="text" class="form-input" id="tcoDescription" placeholder="Describe the open item">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Responsible Party</label>
+      <input type="text" class="form-input" id="tcoResponsible" placeholder="e.g. GC, Owner, Architect, MEP">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Status</label>
+      <select class="form-select" id="tcoStatus">
+        <option value="open">Open</option>
+        <option value="pending">Pending</option>
+        <option value="resolved">Resolved</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input type="text" class="form-input" id="tcoNotes" placeholder="Optional comments">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddTCOModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="saveTCOItem()">Add Item</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── EDIT PROJECT MODAL ── -->
+<div class="modal-overlay" id="editProjectModal">
+  <div class="modal">
+    <div class="modal-title">✏️ Edit Project</div>
+    <input type="hidden" id="editProjectId">
+    <div class="form-group">
+      <label class="form-label">Project Name *</label>
+      <input type="text" class="form-input" id="editProjectName" placeholder="e.g. 1940 Jerome Avenue">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Address</label>
+      <input type="text" class="form-input" id="editAddress" placeholder="e.g. 1940 Jerome Ave">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Borough</label>
+      <select class="form-select" id="editBorough">
+        <option value="">Select Borough</option>
+        <option value="Bronx">Bronx</option>
+        <option value="Brooklyn">Brooklyn</option>
+        <option value="Manhattan">Manhattan</option>
+        <option value="Queens">Queens</option>
+        <option value="Staten Island">Staten Island</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input type="text" class="form-input" id="editProjectNotes" placeholder="Optional">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeEditProjectModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="saveEditProject()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ADD BIN MODAL ── -->
+<div class="modal-overlay" id="addBINModal">
+  <div class="modal">
+    <div class="modal-title">+ Add BIN to Project</div>
+    <div class="form-group">
+      <label class="form-label">BIN Number *</label>
+      <input type="text" class="form-input" id="addBINNumber" placeholder="e.g. 2008251">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Label / Description</label>
+      <input type="text" class="form-input" id="addBINLabel" placeholder="e.g. Main Building, Garage">
+    </div>
+    <div class="form-group">
+      <label class="form-label">DOB Job Number</label>
+      <input type="text" class="form-input" id="addBINJobNumber" placeholder="e.g. X00787559">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddBINModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="saveAddBIN()">Add BIN</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── EDIT BIN MODAL ── -->
+<div class="modal-overlay" id="editBINModal">
+  <div class="modal">
+    <div class="modal-title">✏️ Edit BIN</div>
+    <input type="hidden" id="editBINOld">
+    <div class="form-group">
+      <label class="form-label">BIN Number *</label>
+      <input type="text" class="form-input" id="editBINNumber" placeholder="e.g. 2008251">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Label / Description</label>
+      <input type="text" class="form-input" id="editBINLabel" placeholder="e.g. Main Building, Garage">
+    </div>
+    <div class="form-group">
+      <label class="form-label">DOB Job Number</label>
+      <input type="text" class="form-input" id="editBINJobNumber" placeholder="e.g. X00787559">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeEditBINModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="saveEditBIN()">Save BIN</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SETTINGS MODAL ── -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-title">⚙️ Settings</div>
+    <div class="form-group">
+      <label class="form-label">Company Name</label>
+      <input type="text" class="form-input" id="settCompanyName" placeholder="VOREA CONSTRUCTION">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Displayed in the header logo area</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Search Term</label>
+      <input type="text" class="form-input" id="settSearchTerm" placeholder="VOREA">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Used to query NYC Open Data. Changing this clears the cache and re-fetches all data.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSettingsModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="saveSettings()">Save &amp; Refresh Data</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── COMPLAINT DETAIL MODAL ── -->
+<div class="modal-overlay" id="complaintModal" onclick="if(event.target===this)closeComplaintModal()">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">311 Complaint Details</div>
+    <div id="complaintModalBody" style="max-height:55vh;overflow-y:auto;padding-bottom:.5rem"></div>
+    <div class="modal-actions">
+      <button class="btn btn-accent" onclick="closeComplaintModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── TOAST ── -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+let allData = {};           // { "DOB Violations": [...], ... }
+let currentSource = 'all';
+let currentFilter = 'all';
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let currentSortCol = null;   // null = default sort by date desc
+let currentSortDir = 'desc';
+let clientSearchTerm = '';   // client-side text filter (search bar)
+let currentSearchTerm = 'VOREA'; // API search term (set from /api/settings)
+
+// ── DOB / NYC Portal Link Helper ────────────────────────────────────────────
+const ICON_EXT = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-left:3px"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
+
+function dobLink(type, val) {
+  if (!val || val === '—') return String(val);
+  let url = '';
+  if (type === 'ecb')  url = `https://a836-citypay.nyc.gov/citypay/ecb/vioDetail?vio=${encodeURIComponent(val)}`;
+  else if (type === 'bin')  url = `https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?bin=${encodeURIComponent(val)}&go=1`;
+  else if (type === 'job')  { const jn = String(val).replace(/\D/g,''); url = `https://a810-bisweb.nyc.gov/bisweb/JobsQueryByNumberServlet?passjobnumber=${jn}&passdocnumber=00`; }
+  if (!url) return String(val);
+  return `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent2);text-decoration:none">${val}${ICON_EXT}</a>`;
+}
+
+let currentProjectId = null;
+let currentProjectData = null;
+
+// store rendered page rows so Detail button can look them up by index
+let renderedRows = [];
+
+// Dataset color map
+const SOURCE_COLORS = {
+  'DOB ECB Violations': '#f97316',
+  'OATH Hearings (DOT / All Agencies)': '#3b82f6',
+  'DOT Street Construction Permits': '#60a5fa'
+};
+
+// Label maps per dataset (mirrors backend label_map)
+const LABEL_MAPS = {
+  'DOB ECB Violations': {
+    ecb_violation_number:'ECB Viol #', respondent_house_number:'House #',
+    respondent_street:'Street', boro:'Borough', bin:'BIN',
+    issue_date:'Issue Date', violation_type:'Type', violation_description:'Description',
+    respondent_name:'Respondent', ecb_violation_status:'Status',
+    hearing_date:'Hearing Date', severity:'Severity',
+    penality_imposed:'Penalty', amount_paid:'Amt Paid', balance_due:'Balance Due'
+  },
+  'OATH Hearings (DOT / All Agencies)': {
+    ticket_number:'Ticket #', respondent_last_name:'Last Name',
+    respondent_first_name:'First Name',
+    violation_location_house:'House #', violation_location_street_name:'Street',
+    violation_location_borough:'Borough', violation_date:'Violation Date',
+    issuing_agency:'Agency', charge_1_code_description:'Charge',
+    charge_1_code:'Code', hearing_status:'Status',
+    hearing_date:'Hearing Date',
+    penalty_imposed:'Penalty', paid_amount:'Paid', balance_due:'Balance Due'
+  },
+  'DOT Street Construction Permits': {
+    permitnumber:'Permit #', permitteename:'Permittee', permittypedesc:'Permit Type',
+    equipmenttypedesc:'Equipment/Work', issuedworkstartdate:'Start Date', issuedworkenddate:'End Date',
+    onstreetname:'On Street', fromstreetname:'From', tostreetname:'To',
+    boroughname:'Borough', permitstatusshortdesc:'Status'
+  }
+};
+
+// Columns to show in the table per source
+const TABLE_COLS = {
+  'DOB ECB Violations':['ecb_violation_number','_address','issue_date','violation_type','violation_description','ecb_violation_status','penality_imposed','amount_paid'],
+  'OATH Hearings (DOT / All Agencies)': ['ticket_number','_address','violation_date','hearing_date','issuing_agency','charge_1_code_description','hearing_status','penalty_imposed','balance_due'],
+  'DOT Street Construction Permits': ['permitnumber','_address','issuedworkstartdate','issuedworkenddate','equipmenttypedesc','permitstatusshortdesc'],
+  'all':               ['_source','_id','_address','_date','_status_val']
+};
+
+const COL_LABELS = {
+  '_source':'Source', '_id':'ID', '_address':'Address / Borough',
+  '_date':'Date', '_status_val':'Status'
+};
+
+// ── FETCH ──────────────────────────────────────────────────────────────────
+async function fetchAll() {
+  const search = currentSearchTerm || 'VOREA';
+  showLoader();
+  try {
+    const res = await fetch(`/api/all?search=${encodeURIComponent(search)}`);
+    const json = await res.json();
+
+    allData = json.results;
+    const summary = json.summary;
+
+    // Stat cards
+    document.getElementById('statTotal').textContent = summary.total;
+    document.getElementById('statOpen').textContent = summary.open;
+    document.getElementById('statPending').textContent = summary.pending;
+    document.getElementById('statResolved').textContent = summary.resolved;
+
+    // Nav counts
+    document.getElementById('count-all').textContent       = summary.total;
+    document.getElementById('count-ecb').textContent       = summary.by_source['DOB ECB Violations']?.count || 0;
+    document.getElementById('count-oath').textContent      = summary.by_source['OATH Hearings (DOT / All Agencies)']?.count || 0;
+    document.getElementById('count-dot').textContent       = summary.by_source['DOT Street Construction Permits']?.count || 0;
+
+    // Show cache / live badge next to timestamp
+    const lrEl = document.getElementById('lastRefresh');
+    if (json.from_cache && json.cached_at) {
+      const ageSec  = Math.round((Date.now() - new Date(json.cached_at + 'Z').getTime()) / 1000);
+      const ageMin  = Math.floor(ageSec / 60);
+      const ageLbl  = ageMin > 0 ? `${ageMin}m ago` : `${ageSec}s ago`;
+      lrEl.innerHTML = `<span style="color:var(--resolved)">● cached</span> ${ageLbl}`;
+    } else {
+      lrEl.innerHTML = `<span style="color:var(--accent)">● live</span> ${new Date().toLocaleTimeString()}`;
+    }
+
+    console.log('[fetchAll] Data loaded —', Object.entries(summary.by_source).map(([k,v]) => `${k}: ${v.count}`).join(' | '));
+    if (currentSource === 'calendar') {
+      renderCalendar();
+    } else {
+      renderTable();
+    }
+    showToast(`Loaded ${summary.total} records across all sources`, 'success');
+  } catch(e) {
+    showToast('Failed to fetch data: ' + e.message, 'error');
+    showEmpty();
+  }
+}
+
+// ── SWITCH SOURCE ──────────────────────────────────────────────────────────
+function switchSource(source, el) {
+  currentSource = source;
+  currentPage = 1;
+  currentSortCol = null;
+  currentSortDir = 'desc';
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+
+  const isProjects = source === 'projects';
+  const isCalendar = source === 'calendar';
+  const isSpecial  = isProjects || isCalendar;
+  document.getElementById('projectsView').style.display  = isProjects ? 'block' : 'none';
+  document.getElementById('calendarView').style.display  = isCalendar ? 'block' : 'none';
+  document.getElementById('filterBar').style.display     = isSpecial  ? 'none'  : 'flex';
+  // Hide per-source export button in calendar/project views (top-level Export button handles it)
+  const esBtn = document.getElementById('exportSourceBtn');
+  if (esBtn) esBtn.style.display = isSpecial ? 'none' : '';
+
+  if (isProjects) {
+    document.getElementById('tableWrap').style.display  = 'none';
+    document.getElementById('pagination').style.display = 'none';
+    document.getElementById('loader').classList.remove('visible');
+    document.getElementById('emptyState').classList.remove('visible');
+    document.getElementById('contentTitle').textContent = '🏗️ Project / TCO Tracker';
+    document.getElementById('contentMeta').textContent  = 'BIN-based permit & violation closeout tracking';
+    loadProjects();
+    return;
+  }
+
+  if (isCalendar) {
+    document.getElementById('tableWrap').style.display  = 'none';
+    document.getElementById('pagination').style.display = 'none';
+    document.getElementById('loader').classList.remove('visible');
+    document.getElementById('emptyState').classList.remove('visible');
+    document.getElementById('contentTitle').textContent = '📅 Hearings Calendar';
+    document.getElementById('contentMeta').textContent  = 'OATH hearing schedule & totals';
+    // If data not yet loaded, fetch first — renderCalendar() will be called by fetchAll()
+    if (Object.keys(allData).length === 0) {
+      console.log('[Calendar] No data yet — triggering fetchAll()');
+      fetchAll();
+    } else {
+      renderCalendar();
+    }
+    return;
+  }
+
+  const titles = {
+    'all': 'All Violations & Permits',
+    'DOB ECB Violations': '⚖️ ECB / OATH Violations (DOB-issued)',
+    'OATH Hearings (DOT / All Agencies)': '🏛️ OATH Hearings — DOT & All Agencies',
+    'DOT Street Construction Permits': '🚧 DOT Street Construction Permits'
+  };
+  document.getElementById('contentTitle').textContent = titles[source] || source;
+  renderTable();
+}
+
+// ── FILTER ─────────────────────────────────────────────────────────────────
+function filterByStatus(status, el) {
+  currentFilter = status;
+  currentPage = 1;
+  document.querySelectorAll('.filter-btn').forEach(b => b.className = 'filter-btn');
+  el.classList.add(`active-${status}`);
+  renderTable();
+}
+
+// ── RENDER TABLE ───────────────────────────────────────────────────────────
+function renderTable() {
+  if (Object.keys(allData).length === 0) { showEmpty(); return; }
+
+  // Gather rows
+  let rows = [];
+  if (currentSource === 'all') {
+    for (const [src, recs] of Object.entries(allData)) {
+      rows = rows.concat(recs.map(r => ({...r, _source: r._source || src})));
+    }
+  } else {
+    rows = (allData[currentSource] || []).map(r => ({...r, _source: r._source || currentSource}));
+  }
+
+  // Client text filter (search bar)
+  if (clientSearchTerm) {
+    const q = clientSearchTerm.toLowerCase();
+    rows = rows.filter(r =>
+      Object.values(r).some(v => v && String(v).toLowerCase().includes(q))
+    );
+  }
+
+  // Status filter
+  if (currentFilter !== 'all') {
+    rows = rows.filter(r => r._status_class === currentFilter);
+  }
+
+  // Sort — column click overrides default date-desc
+  if (currentSortCol) {
+    rows.sort((a, b) => {
+      let va = a[currentSortCol], vb = b[currentSortCol];
+      if (va === undefined || va === null) va = '';
+      if (vb === undefined || vb === null) vb = '';
+      const cmp = String(va).localeCompare(String(vb), undefined, {numeric: true, sensitivity: 'base'});
+      return currentSortDir === 'asc' ? cmp : -cmp;
+    });
+  } else {
+    rows.sort((a, b) => {
+      if (!a._date && !b._date) return 0;
+      if (!a._date) return 1;
+      if (!b._date) return -1;
+      return b._date.localeCompare(a._date);
+    });
+  }
+
+  const total = rows.length;
+  if (total === 0) { showEmpty(); return; }
+
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = rows.slice(start, start + PAGE_SIZE);
+
+  // !! Store for Detail lookups by index
+  renderedRows = pageRows;
+
+  document.getElementById('contentMeta').textContent =
+    `${total} record${total !== 1 ? 's' : ''}${currentFilter !== 'all' ? ` (${currentFilter})` : ''}`;
+
+  const cols = TABLE_COLS[currentSource] || ['_id', '_address', '_date', '_status_val'];
+  const labelMap = currentSource !== 'all' ? (LABEL_MAPS[currentSource] || {}) : {};
+  const allLabels = { ...COL_LABELS, ...labelMap };
+
+  // Header — sortable columns
+  document.getElementById('tableHead').innerHTML =
+    '<tr>' + cols.map(c => {
+      const label = allLabels[c] || c;
+      const isActive = currentSortCol === c;
+      const arrow = isActive ? (currentSortDir === 'asc' ? '▲' : '▼') : '⇅';
+      return `<th class="${isActive ? 'sort-active' : ''}" onclick="sortBy('${c}')">${label} <span class="sort-icon">${arrow}</span></th>`;
+    }).join('') + '<th></th></tr>';
+
+  // Body — use row INDEX for detail lookup, no JSON in onclick
+  document.getElementById('tableBody').innerHTML = pageRows.map((row, idx) => {
+    const cells = cols.map(col => {
+      let val = row[col];
+      if (val === undefined || val === null || val === '') val = '—';
+
+      if (col === '_source') {
+        const color = SOURCE_COLORS[val] || '#888';
+        return `<td><span class="source-tag" style="background:${color}22;color:${color};border:1px solid ${color}44">${val}</span></td>`;
+      }
+
+      if (col === '_address') {
+        return `<td style="max-width:200px;white-space:normal;font-size:12px" title="${val}">${val}</td>`;
+      }
+
+      const statusCols = ['_status_val','ecb_violation_status','permit_status','status',
+                          'violation_category','disposition_comments','hearing_result','hearing_status'];
+      if (statusCols.includes(col)) {
+        const sc = row._status_class || 'pending';
+        const label = String(val).slice(0, 35);
+        return `<td><span class="badge badge-${sc}"><span class="badge-dot"></span>${label}</span></td>`;
+      }
+
+      // Dollar formatting for financial columns
+      const dollarCols = ['penalty_imposed','penality_imposed','balance_due','paid_amount','amount_paid','penalty_amount'];
+      if (dollarCols.includes(col) && val !== '—') {
+        const n = parseFloat(val);
+        if (!isNaN(n)) {
+          const formatted = '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+          const color = (col === 'balance_due' && n > 0) ? 'color:var(--open)' : (col === 'paid_amount' || col === 'amount_paid') ? 'color:var(--resolved)' : '';
+          return `<td style="font-family:var(--font-mono);font-size:12px;${color}">${formatted}</td>`;
+        }
+      }
+
+      if (col === 'ecb_violation_number') {
+        const ecbURL = `https://a836-citypay.nyc.gov/citypay/ecb/vioDetail?vio=${encodeURIComponent(val)}`;
+        return `<td class="mono"><a href="${ecbURL}" target="_blank" rel="noopener" title="View on DOB ECB Portal" style="color:var(--accent2);text-decoration:none">${val}${ICON_EXT}</a></td>`;
+      }
+      const idCols = ['_id','isn_dob_bis_viol','permitnumber','violation_number','ticket_number'];
+      if (idCols.includes(col)) return `<td class="mono">${val}</td>`;
+
+      if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) val = val.slice(0, 10);
+
+      const display = String(val).slice(0, 60);
+      return `<td title="${String(val)}">${display}</td>`;
+    }).join('');
+
+    return `<tr onclick="openDetail(${idx})" style="cursor:pointer">${cells}
+      <td><button class="btn btn-sm" onclick="event.stopPropagation();openDetail(${idx})">View</button></td>
+    </tr>`;
+  }).join('');
+
+  renderPagination(total, start, pageRows.length);
+  hideLoader();
+  document.getElementById('tableWrap').style.display = 'block';
+  document.getElementById('emptyState').classList.remove('visible');
+}
+
+// ── SORT ───────────────────────────────────────────────────────────────────
+function sortBy(col) {
+  if (currentSortCol === col) {
+    currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    currentSortCol = col;
+    currentSortDir = 'asc';
+  }
+  currentPage = 1;
+  renderTable();
+}
+
+// ── PAGINATION ─────────────────────────────────────────────────────────────
+function renderPagination(total, start, count) {
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  document.getElementById('pageInfo').textContent = `Showing ${start+1}–${start+count} of ${total}`;
+
+  let btns = `<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage<=1?'disabled':''}>‹</button>`;
+  const range = [];
+  for (let i = Math.max(1, currentPage-2); i <= Math.min(totalPages, currentPage+2); i++) range.push(i);
+  if (range[0] > 1) btns += `<button class="page-btn" onclick="goPage(1)">1</button>`;
+  if (range[0] > 2) btns += `<span style="color:var(--text-muted);padding:0 4px">…</span>`;
+  range.forEach(p => { btns += `<button class="page-btn ${p===currentPage?'active':''}" onclick="goPage(${p})">${p}</button>`; });
+  if (range[range.length-1] < totalPages-1) btns += `<span style="color:var(--text-muted);padding:0 4px">…</span>`;
+  if (range[range.length-1] < totalPages) btns += `<button class="page-btn" onclick="goPage(${totalPages})">${totalPages}</button>`;
+  btns += `<button class="page-btn" onclick="goPage(${currentPage+1})" ${currentPage>=totalPages?'disabled':''}>›</button>`;
+
+  document.getElementById('pageBtns').innerHTML = btns;
+  document.getElementById('pagination').style.display = 'flex';
+}
+
+function goPage(p) { currentPage = p; renderTable(); window.scrollTo(0,0); }
+
+// ── DETAIL PANEL ── FIX: look up row by index in renderedRows array ────────
+function openDetail(idx) {
+  const row = renderedRows[idx];
+  if (!row) return;
+  const source = row._source || currentSource;
+
+  document.getElementById('detailId').textContent = row._id || 'Record';
+
+  // Show address prominently at top
+  if (row._address) {
+    document.getElementById('detailId').textContent =
+      (row._id ? row._id + ' — ' : '') + row._address;
+  }
+
+  // Build DOB action buttons for this record
+  const ecbNum = row.ecb_violation_number || row.ecb_number;
+  const binNum = row.bin;
+  let actionLinks = `<span style="color:var(--text-muted)">${source}</span>`;
+  if (ecbNum) actionLinks += ` &nbsp;<a href="https://a836-citypay.nyc.gov/citypay/ecb/vioDetail?vio=${encodeURIComponent(ecbNum)}" target="_blank" rel="noopener" class="btn btn-sm" style="font-size:9px">🔗 ECB Portal ↗</a>`;
+  if (binNum) actionLinks += ` <a href="https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?bin=${encodeURIComponent(binNum)}&go=1" target="_blank" rel="noopener" class="btn btn-sm" style="font-size:9px">🏢 DOB BIS ↗</a>`;
+  document.getElementById('detailSource').innerHTML = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${actionLinks}</div>`;
+
+  const labelMap = LABEL_MAPS[source] || {};
+  const html = Object.entries(row)
+    .filter(([k]) => !k.startsWith('_'))
+    .map(([k, v]) => {
+      const label = labelMap[k] || k.replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase());
+      if (!v && v !== 0) return '';
+      let display = String(v);
+      if (k === 'ecb_violation_number' || k === 'ecb_number') display = dobLink('ecb', v);
+      else if (k === 'bin')   display = dobLink('bin', v);
+      else if (k === 'job__') display = dobLink('job', v);
+      return `<div class="detail-row">
+        <div class="detail-key">${label}</div>
+        <div class="detail-val">${display}</div>
+      </div>`;
+    }).filter(Boolean).join('');
+
+  document.getElementById('detailRows').innerHTML = html || '<div style="color:var(--text-muted);font-size:12px">No additional details available.</div>';
+  document.getElementById('detailPanel').classList.add('visible');
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('visible');
+}
+
+// ── EXPORT ─────────────────────────────────────────────────────────────────
+function exportCSV(source) {
+  // Build rows from in-memory cache (allData) — no network re-fetch
+  let rows = [];
+  if (source === 'all') {
+    Object.entries(allData).forEach(([key, data]) => {
+      (data || []).forEach(rec => rows.push({...rec, _source: key}));
+    });
+  } else if (source === 'calendar') {
+    rows = getHearingsData().map(r => ({...r, _source: r._cal_source || 'OATH'}));
+  } else if (allData[source] && allData[source].length) {
+    rows = allData[source];
+  } else {
+    // Fallback to server export if no in-memory data
+    const search = document.getElementById('searchInput').value.trim() || 'VOREA';
+    const src = encodeURIComponent(source);
+    window.location.href = `/api/export?dataset=${src}&search=${encodeURIComponent(search)}`;
+    showToast('Fetching data for export…', 'info');
+    return;
+  }
+
+  if (!rows.length) { showToast('No data to export', 'error'); return; }
+
+  // Collect all non-private field names
+  const allKeys = new Set();
+  rows.forEach(r => Object.keys(r).forEach(k => { if (!k.startsWith('_') || k === '_source') allKeys.add(k); }));
+  const fields = ['_source', ...Array.from(allKeys).filter(k => k !== '_source').sort()];
+
+  const escape = v => {
+    const s = String(v == null ? '' : v).replace(/\r?\n/g, ' ');
+    return (s.includes(',') || s.includes('"') || s.includes("'")) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const lines = [fields.map(escape).join(',')];
+  rows.forEach(r => lines.push(fields.map(f => escape(r[f] ?? '')).join(',')));
+
+  const blob = new Blob([lines.join('\r\n')], {type: 'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `vorea_violations_${new Date().toISOString().slice(0,19).replace(/[:T]/g, '-')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`Exported ${rows.length} records from cache`, 'success');
+}
+
+// ── ALERTS ─────────────────────────────────────────────────────────────────
+function closeAlertModal() { document.getElementById('alertModal').classList.remove('visible'); }
+
+async function openAlertModal() {
+  document.getElementById('alertModal').classList.add('visible');
+  document.getElementById('alertStatus').style.display = 'none';
+  // Load existing config from server
+  try {
+    const res = await fetch('/api/email_config');
+    const cfg = await res.json();
+    document.getElementById('alertEmail').value    = cfg.recipient  || '';
+    document.getElementById('alertSmtpUser').value = cfg.smtp_user  || '';
+    document.getElementById('alertSmtpPass').value = '';             // never pre-fill password
+    document.getElementById('alertFreq').value      = cfg.frequency || 'daily';
+    document.getElementById('alertThreshold').value = cfg.threshold || 'all';
+    // Restore selected sources
+    const savedSrcs = JSON.parse(cfg.sources || '[]');
+    if (savedSrcs.length) {
+      Array.from(document.getElementById('alertSources').options).forEach(opt => {
+        opt.selected = savedSrcs.includes(opt.value);
+      });
+    }
+  } catch(e) { /* keep defaults */ }
+}
+
+async function saveAlertConfig() {
+  const email = document.getElementById('alertEmail').value.trim();
+  if (!email) { showToast('Please enter a recipient email', 'error'); return; }
+  const sources = Array.from(document.getElementById('alertSources').selectedOptions).map(o => o.value);
+  const payload = {
+    recipient:  email,
+    frequency:  document.getElementById('alertFreq').value,
+    threshold:  document.getElementById('alertThreshold').value,
+    sources,
+    smtp_user:  document.getElementById('alertSmtpUser').value.trim(),
+    smtp_pass:  document.getElementById('alertSmtpPass').value,   // empty = keep existing
+  };
+  try {
+    const res = await fetch('/api/email_config', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const d = await res.json();
+    if (d.success) {
+      closeAlertModal();
+      showToast('Email config saved', 'success');
+    } else {
+      showToast('Save failed', 'error');
+    }
+  } catch(e) { showToast('Save failed: ' + e.message, 'error'); }
+}
+
+async function sendTestDigest() {
+  const statusEl = document.getElementById('alertStatus');
+  statusEl.style.display = 'block';
+  statusEl.style.background = 'var(--surface2)';
+  statusEl.style.color = 'var(--text-dim)';
+  statusEl.textContent = 'Sending test digest…';
+  try {
+    // Save config first so credentials are stored
+    const email = document.getElementById('alertEmail').value.trim();
+    if (!email) { statusEl.textContent = '⚠ Enter a recipient email first.'; return; }
+    const sources = Array.from(document.getElementById('alertSources').selectedOptions).map(o => o.value);
+    await fetch('/api/email_config', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        recipient: email, frequency: document.getElementById('alertFreq').value,
+        threshold: document.getElementById('alertThreshold').value, sources,
+        smtp_user: document.getElementById('alertSmtpUser').value.trim(),
+        smtp_pass: document.getElementById('alertSmtpPass').value,
+      })
+    });
+    const res  = await fetch('/api/send_digest', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      statusEl.style.background = 'rgba(34,197,94,.12)';
+      statusEl.style.color      = 'var(--resolved)';
+      statusEl.textContent      = '✓ Test digest sent successfully!';
+    } else {
+      statusEl.style.background = 'rgba(239,68,68,.12)';
+      statusEl.style.color      = 'var(--open)';
+      statusEl.textContent      = '✕ ' + (data.message || 'Send failed');
+    }
+  } catch(e) {
+    statusEl.style.background = 'rgba(239,68,68,.12)';
+    statusEl.style.color      = 'var(--open)';
+    statusEl.textContent      = '✕ Error: ' + e.message;
+  }
+}
+
+// ── TOAST ──────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ── LOADER ─────────────────────────────────────────────────────────────────
+function showLoader() {
+  document.getElementById('loader').classList.add('visible');
+  document.getElementById('tableWrap').style.display = 'none';
+  document.getElementById('emptyState').classList.remove('visible');
+  document.getElementById('pagination').style.display = 'none';
+}
+function hideLoader() { document.getElementById('loader').classList.remove('visible'); }
+function showEmpty() {
+  hideLoader();
+  document.getElementById('tableWrap').style.display = 'none';
+  document.getElementById('emptyState').classList.add('visible');
+  document.getElementById('pagination').style.display = 'none';
+}
+
+// ── HEARINGS CALENDAR ─────────────────────────────────────────────────────────
+
+let calYear  = new Date().getFullYear();
+let calMonth = new Date().getMonth();  // 0-indexed
+let calView  = 'grid';  // 'grid' | 'agenda' | 'summary'
+
+// Normalise any Socrata date string → YYYY-MM-DD (or '' if invalid)
+function isoDate(raw) {
+  const s = String(raw || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  return '';
+}
+
+// Format YYYY-MM-DD → "Monday, January 15, 2024"  (safe – never returns "Invalid Date")
+function fmtCalDate(raw) {
+  const iso = isoDate(raw);
+  if (!iso) return raw || '—';
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric', year:'numeric'});
+}
+
+const CAL_MONTHS = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+const CAL_AGENCY_COLORS = {
+  'DOB':'#ef4444','DSNY':'#22c55e','DEP':'#22c55e','DOT':'#3b82f6',
+  'HPD':'#f97316','FDNY':'#f43f5e','DCA':'#a855f7','ECB':'#f59e0b'
+};
+
+function getHearingsData() {
+  // Combine OATH hearings + DOB ECB violations that have a hearing date
+  const oath = (allData['OATH Hearings (DOT / All Agencies)'] || [])
+    .filter(h => isoDate(h.hearing_date))
+    .map(h => ({...h,
+                _cal_source: 'OATH',
+                _cal_label: h.ticket_number || '—',
+                hearing_date: isoDate(h.hearing_date) }));
+  const ecb = (allData['DOB ECB Violations'] || [])
+    .filter(h => isoDate(h.hearing_date))
+    .map(h => ({...h,
+                _cal_source: 'ECB',
+                _cal_label: h.ecb_violation_number || '—',
+                issuing_agency: 'DOB-ECB',
+                ticket_number: h.ecb_violation_number || '',
+                charge_1_code_description: h.violation_description || h.violation_type || '—',
+                hearing_status: h.ecb_violation_status || '—',
+                penalty_imposed: h.penality_imposed || '',
+                balance_due: h.balance_due || '0',
+                // _address is already the building address (BIN-enriched); keep it as-is
+                hearing_date: isoDate(h.hearing_date) }));
+  return [...oath, ...ecb];
+}
+
+function renderCalendar() {
+  const hearings = getHearingsData();
+  const today    = new Date().toISOString().slice(0,10);
+  const upcoming = hearings.filter(h => (h.hearing_date||'').slice(0,10) >= today).length;
+
+  // Update sidebar count
+  const countEl = document.getElementById('count-hearings');
+  if (countEl) countEl.textContent = upcoming;
+
+  // Update meta line
+  const totalDue = hearings.reduce((s,h) => s + (parseFloat(h.balance_due||0)||0), 0);
+  document.getElementById('calendarMeta').textContent =
+    `${hearings.length} hearings · $${totalDue.toLocaleString('en-US',{minimumFractionDigits:0})} due · ${upcoming} upcoming`;
+
+  if (calView === 'grid')         renderCalGrid(hearings);
+  else if (calView === 'agenda')  renderCalAgenda(hearings);
+  else if (calView === 'summary') renderCalSummary();
+}
+
+function switchCalView(view, btn) {
+  calView = view;
+  document.getElementById('cal-grid-view').style.display    = view === 'grid'    ? 'block' : 'none';
+  document.getElementById('cal-agenda-view').style.display  = view === 'agenda'  ? 'block' : 'none';
+  document.getElementById('cal-summary-view').style.display = view === 'summary' ? 'block' : 'none';
+  document.querySelectorAll('#calendarView .cal-view-btn').forEach(b => b.classList.remove('active-tab'));
+  if (btn) btn.classList.add('active-tab');
+  renderCalendar();
+}
+
+function calMovMonth(dir) {
+  if (dir === 0) { calYear = new Date().getFullYear(); calMonth = new Date().getMonth(); }
+  else { calMonth += dir; if (calMonth > 11) { calMonth = 0; calYear++; } if (calMonth < 0) { calMonth = 11; calYear--; } }
+  renderCalGrid(getHearingsData());
+}
+
+function renderCalGrid(hearings) {
+  document.getElementById('cal-grid-view').style.display = 'block';
+  document.getElementById('calMonthLabel').textContent = `${CAL_MONTHS[calMonth]} ${calYear}`;
+
+  // Build day→hearings map (hearing_date is already YYYY-MM-DD from getHearingsData)
+  const dayMap = {};
+  hearings.forEach(h => {
+    const d = h.hearing_date || '';
+    if (d) { if (!dayMap[d]) dayMap[d] = []; dayMap[d].push(h); }
+  });
+
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  let html = '';
+  // Blank cells for before first
+  for (let i = 0; i < firstDay; i++) html += `<div class="cal-day other-month"></div>`;
+  // Days
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday = dateStr === todayStr;
+    const dayH = dayMap[dateStr] || [];
+    const dots = dayH.slice(0,3).map(h => {
+      const agency = (h.issuing_agency||'').toUpperCase().split(' ')[0];
+      const col = CAL_AGENCY_COLORS[agency] || 'var(--accent)';
+      return `<span class="cal-dot" style="background:${col}" onclick="showCalDay('${dateStr}')">${agency} ${h.ticket_number||''}</span>`;
+    }).join('');
+    const more = dayH.length > 3 ? `<span class="cal-dot" style="background:var(--surface);color:var(--text-muted);border:1px solid var(--border)" onclick="showCalDay('${dateStr}')">+${dayH.length-3} more</span>` : '';
+    html += `<div class="cal-day${isToday?' today':''}"><div class="cal-day-num">${d}</div>${dots}${more}</div>`;
+  }
+  // Fill rest of grid to 6 rows
+  const totalCells = firstDay + daysInMonth;
+  const remainder = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let i = 0; i < remainder; i++) html += `<div class="cal-day other-month"></div>`;
+  document.getElementById('calDaysGrid').innerHTML = html;
+}
+
+function showCalDay(dateStr) {
+  const hearings = getHearingsData().filter(h => h.hearing_date === dateStr);
+  document.getElementById('calDayTitle').textContent =
+    `${fmtCalDate(dateStr)} — ${hearings.length} hearing${hearings.length!==1?'s':''}`;
+  document.getElementById('calDayList').innerHTML = hearings.map(h => `
+    <div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">
+        <span class="badge badge-pending" style="font-size:9px">${h.issuing_agency||'—'}</span>
+        <span class="mono" style="font-size:10px;color:var(--accent)">${h.ticket_number||'—'}</span>
+        <span style="font-size:10px;color:var(--text-muted)">${h.hearing_status||'—'}</span>
+      </div>
+      <div style="font-size:12px">${h.charge_1_code_description||'—'}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${h._address||''}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+        ${h.penalty_imposed ? 'Penalty: $'+h.penalty_imposed : ''}
+        ${h.balance_due && parseFloat(h.balance_due)>0 ? ' · Due: $'+parseFloat(h.balance_due).toFixed(2) : ''}
+      </div>
+    </div>`).join('');
+  document.getElementById('calDayDetail').style.display = 'block';
+}
+
+function renderCalAgenda(hearings) {
+  document.getElementById('cal-agenda-view').style.display = 'block';
+  const today = new Date().toISOString().slice(0,10);
+  const upcoming = hearings
+    .filter(h => (h.hearing_date || '') >= today)
+    .sort((a,b) => (a.hearing_date||'').localeCompare(b.hearing_date||''));
+
+  if (!upcoming.length) {
+    document.getElementById('calAgendaList').innerHTML =
+      '<div style="padding:2rem;color:var(--text-muted);text-align:center">No upcoming scheduled hearings.</div>';
+    return;
+  }
+
+  // Group by date
+  const groups = {};
+  upcoming.forEach(h => {
+    const d = h.hearing_date || '';
+    if (!groups[d]) groups[d] = [];
+    groups[d].push(h);
+  });
+
+  document.getElementById('calAgendaList').innerHTML = Object.entries(groups).map(([date, items]) => {
+    const dateLabel = fmtCalDate(date);
+    const rows = items.map(h => {
+      const due = parseFloat(h.balance_due||0) || 0;
+      return `<div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);align-items:flex-start">
+        <span class="badge badge-pending" style="font-size:9px;flex-shrink:0">${h.issuing_agency||'—'}</span>
+        <div style="flex:1">
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--accent)">${h.ticket_number||'—'}</div>
+          <div style="font-size:12px;margin-top:2px">${h.charge_1_code_description||'—'}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${h._address||''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-family:var(--font-mono);font-size:11px">${h.hearing_status||'—'}</div>
+          ${due > 0 ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--open)">$${due.toFixed(2)} due</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="cal-agenda-group">
+      <div class="cal-agenda-date">${dateLabel} <span style="color:var(--text-muted)">(${items.length})</span></div>
+      ${rows}
+    </div>`;
+  }).join('');
+}
+
+// ── SUMMARY TABLE ──────────────────────────────────────────────────────────
+// ── Calendar Summary sort state ───────────────────────────────────────────────
+let calSumSortCol = 'due';
+let calSumSortDir = 'desc';
+
+function sortCalSummary(col) {
+  if (calSumSortCol === col) calSumSortDir = calSumSortDir === 'asc' ? 'desc' : 'asc';
+  else { calSumSortCol = col; calSumSortDir = col === 'address' ? 'asc' : 'desc'; }
+  renderCalSummary();
+}
+
+function renderCalSummary() {
+  const el = document.getElementById('calSummaryTable');
+  if (!el) return;
+
+  const fmt = v => (v !== null && v !== undefined && !isNaN(v) && v !== 0)
+    ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0})
+    : '—';
+
+  // Sort arrow helper
+  const arrow = col => calSumSortCol === col ? (calSumSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const thStyle = 'cursor:pointer;user-select:none;padding:8px 12px;border-bottom:2px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)';
+  const th  = (txt, col, right) =>
+    `<th style="text-align:${right?'right':'left'};${thStyle}" onclick="sortCalSummary('${col}')">${txt}${arrow(col)}</th>`;
+
+  // ── Use ONLY hearings data (OATH + ECB with hearing_date) — avoids double counting ──
+  const hearings = getHearingsData();
+
+  // ── Section 1: Group by BIN (ECB has bin field; OATH uses _address) ───────
+  const binMap = {};
+  hearings.forEach(r => {
+    // Prefer BIN-based grouping for ECB records; fallback to address for OATH
+    const bin  = (r.bin || '').trim();
+    const addr = (r._address || '').trim() || 'Unknown Address';
+    const key  = bin ? bin : ('addr:' + addr);
+    if (!binMap[key]) binMap[key] = { bin, address: addr, count:0, open:0, pen:0, paid:0, due:0 };
+    binMap[key].count++;
+    if (r._status_class === 'open') binMap[key].open++;
+    binMap[key].pen  += parseFloat(r.penalty_imposed || r.penality_imposed || 0) || 0;
+    binMap[key].paid += parseFloat(r.paid_amount     || r.amount_paid      || 0) || 0;
+    binMap[key].due  += parseFloat(r.balance_due     || 0) || 0;
+  });
+
+  // Sort entries
+  const binEntries = Object.values(binMap).sort((a, b) => {
+    let va, vb;
+    if (calSumSortCol === 'address') { va = a.address; vb = b.address; }
+    else if (calSumSortCol === 'count') { va = a.count; vb = b.count; }
+    else if (calSumSortCol === 'open')  { va = a.open;  vb = b.open; }
+    else if (calSumSortCol === 'pen')   { va = a.pen;   vb = b.pen; }
+    else if (calSumSortCol === 'paid')  { va = a.paid;  vb = b.paid; }
+    else { va = a.due; vb = b.due; }
+    const cmp = typeof va === 'string' ? va.localeCompare(vb) : (va - vb);
+    return calSumSortDir === 'asc' ? cmp : -cmp;
+  });
+
+  let totCount = 0, totOpen = 0, totPen = 0, totPaid = 0, totDue = 0;
+  const binRows = binEntries.map(d => {
+    totCount += d.count; totOpen += d.open;
+    totPen += d.pen; totPaid += d.paid; totDue += d.due;
+    const binLabel = d.bin
+      ? `<span style="font-family:var(--font-mono);font-size:10px;color:var(--accent2);margin-right:4px">BIN ${d.bin}</span>`
+      : '';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;max-width:280px">${binLabel}<span style="font-size:12px">${d.address}</span></td>
+      <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono)">${d.count}</td>
+      <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono);color:var(--open)">${d.open || '—'}</td>
+      <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono)">${fmt(d.pen)}</td>
+      <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono);color:var(--resolved)">${fmt(d.paid)}</td>
+      <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono);color:${d.due>0?'var(--open)':'inherit'}">${fmt(d.due)}</td>
+    </tr>`;
+  }).join('');
+
+  const thead = `<tr style="background:var(--surface2)">
+    ${th('Building / Address','address')}${th('Hearings','count',1)}${th('Open','open',1)}${th('Penalty','pen',1)}${th('Paid','paid',1)}${th('Balance Due','due',1)}
+  </tr>`;
+
+  // ── Section 2: OATH / ECB breakdown by issuing agency ────────────────────
+  const agMap = {};
+  hearings.forEach(r => {
+    const ag = (r.issuing_agency || 'DOB-ECB').toUpperCase().split(' ')[0];
+    if (!agMap[ag]) agMap[ag] = { count:0, open:0, pen:0, paid:0, due:0 };
+    agMap[ag].count++;
+    if (r._status_class === 'open') agMap[ag].open++;
+    agMap[ag].pen  += parseFloat(r.penalty_imposed || r.penality_imposed || 0) || 0;
+    agMap[ag].paid += parseFloat(r.paid_amount     || r.amount_paid      || 0) || 0;
+    agMap[ag].due  += parseFloat(r.balance_due     || 0) || 0;
+  });
+
+  let totAgPen = 0, totAgPaid = 0, totAgDue = 0, totAgCount = 0, totAgOpen = 0;
+  const agRows = Object.entries(agMap)
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([ag, d]) => {
+      totAgCount += d.count; totAgOpen += d.open;
+      totAgPen += d.pen; totAgPaid += d.paid; totAgDue += d.due;
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 12px">${ag}</td>
+        <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono)">${d.count}</td>
+        <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono);color:var(--open)">${d.open || '—'}</td>
+        <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono)">${fmt(d.pen)}</td>
+        <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono);color:var(--resolved)">${fmt(d.paid)}</td>
+        <td style="text-align:right;padding:8px 12px;font-family:var(--font-mono);color:${d.due>0?'var(--open)':'inherit'}">${fmt(d.due)}</td>
+      </tr>`;
+    }).join('');
+
+  const sectionLabel = txt => `<tr><td colspan="6" style="padding:8px 12px 6px;font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);background:var(--surface2);border-top:2px solid var(--border)">${txt}</td></tr>`;
+  const totalRow = (count, open, pen, paid, due) =>
+    `<tr style="font-weight:700;border-top:2px solid var(--border);background:var(--surface)">
+      <td style="padding:9px 12px">TOTAL</td>
+      <td style="text-align:right;padding:9px 12px;font-family:var(--font-mono)">${count}</td>
+      <td style="text-align:right;padding:9px 12px;font-family:var(--font-mono);color:var(--open)">${open}</td>
+      <td style="text-align:right;padding:9px 12px;font-family:var(--font-mono)">${fmt(pen)}</td>
+      <td style="text-align:right;padding:9px 12px;font-family:var(--font-mono);color:var(--resolved)">${fmt(paid)}</td>
+      <td style="text-align:right;padding:9px 12px;font-family:var(--font-mono);color:${due>0?'var(--open)':'inherit'}">${fmt(due)}</td>
+    </tr>`;
+
+  el.innerHTML = `<div style="overflow-x:auto;margin-top:.5rem">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>${thead}</thead>
+      <tbody>
+        ${sectionLabel('Hearings by Building — OATH + ECB (click headers to sort)')}
+        ${binRows || '<tr><td colspan="6" style="padding:1rem;color:var(--text-muted);text-align:center">No hearing data loaded — click Refresh All first</td></tr>'}
+        ${totalRow(totCount, totOpen, totPen, totPaid, totDue)}
+      </tbody>
+      <tbody>
+        ${sectionLabel('OATH / ECB Hearings — Breakdown by Issuing Agency')}
+        ${agRows}
+        ${totalRow(totAgCount, totAgOpen, totAgPen, totAgPaid, totAgDue)}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// ── BIN / PROJECT TRACKER ──────────────────────────────────────────────────
+
+const PERMIT_TYPE_LABELS = {
+  'GC':'General Construction','EW':'Equipment Work','FP':'Fire Suppression',
+  'SP':'Sprinkler','MH':'Mechanical','EL':'Electrical','PL':'Plumbing',
+  'NB':'New Building','A1':'Major Alteration','A2':'Minor Alteration',
+  'A3':'Minor Alteration','SD':'Stand Pipe','SF':'Scaffold','BL':'Boiler',
+  'CC':'Curb Cut','OT':'Other'
+};
+const TCO_SECTION_LABELS = {
+  'construction':'🏗️ Construction Signoff',
+  'plumbing':    '🔧 Plumbing Signoff',
+  'elevator':    '🛗 Elevator Signoff',
+  'technical':   '📋 Technical Reports (TRs / Special Inspections)',
+  'bis':         '📁 BIS Administrative',
+  'other':       '📌 Other Items'
+};
+
+// ── Load Project List ────────────────────────────────────────────────────────
+async function loadProjects() {
+  try {
+    const res = await fetch('/api/projects');
+    const projects = await res.json();
+    document.getElementById('count-projects').textContent = projects.length;
+    document.getElementById('projectsMeta').textContent =
+      `${projects.length} project${projects.length !== 1 ? 's' : ''} tracked`;
+    const container = document.getElementById('projectCards');
+    if (!projects.length) {
+      container.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-muted)">
+        <div style="font-size:2.5rem;margin-bottom:1rem">🏗️</div>
+        <div style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);margin-bottom:.5rem">No projects yet</div>
+        <div style="font-size:12px">Click "+ Add Project" to start tracking</div>
+      </div>`;
+      return;
+    }
+    container.innerHTML = projects.map(p => {
+      const bins = p.bins || [];
+      const tc   = p.tco_counts || {open:0, pending:0, total:0};
+      const chips = bins.map(b =>
+        `<span class="project-bin${b.is_primary ? ' bin-chip-primary' : ''}" title="${b.label||''}">BIN ${b.bin}${b.label ? ' · '+b.label : ''}</span>`
+      ).join('');
+      return `
+      <div class="project-card" onclick="showProject(${p.id})">
+        <div class="project-card-header">
+          <div>
+            <div class="project-name">${p.project_name}</div>
+            <div class="project-address">${[p.address, p.borough].filter(Boolean).join(', ')}</div>
+          </div>
+          <button class="btn btn-sm" onclick="event.stopPropagation();deleteProjectById(${p.id},'${p.project_name.replace(/'/g,"\\'")}')"
+            style="color:var(--open);border-color:rgba(239,68,68,.2);background:transparent;padding:3px 8px;font-size:9px">✕</button>
+        </div>
+        <div class="project-meta">${chips || '<span style="color:var(--text-muted);font-size:10px">No BINs</span>'}</div>
+        ${(tc.open||tc.pending) ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          ${tc.open    ? `<span class="badge badge-open"    style="font-size:9px">${tc.open} open</span>`    : ''}
+          ${tc.pending ? `<span class="badge badge-pending" style="font-size:9px">${tc.pending} pending</span>` : ''}
+        </div>` : ''}
+        ${p.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;font-style:italic">${p.notes}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) { showToast('Failed to load projects: ' + e.message, 'error'); }
+}
+
+async function showProject(project_id) {
+  currentProjectId = project_id;
+  document.getElementById('projectsList').style.display = 'none';
+  document.getElementById('binReport').style.display    = 'block';
+  document.getElementById('reportTitle').textContent    = 'Loading…';
+  document.getElementById('reportMeta').textContent     = 'Fetching data…';
+  document.getElementById('reportBINs').innerHTML       = '';
+  ['tab-permits','tab-dot','tab-violations','tab-ecb','tab-complaints','tab-electrical','tab-elevator','tab-checklist'].forEach(id =>
+    document.getElementById(id).innerHTML =
+      '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading…</div>');
+  document.querySelectorAll('.report-tab').forEach((t,i) => t.classList.toggle('active-tab', i===0));
+  document.querySelectorAll('.report-tab-content').forEach((t,i) => { t.style.display = i===0 ? 'block' : 'none'; });
+
+  try {
+    const res  = await fetch(`/api/projects/${project_id}/report`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    currentProjectData = data;
+    const p = data.project;
+    document.getElementById('reportTitle').textContent = p.project_name;
+    const totalOpen = (data.violations.dob_open_count||0) + (data.violations.safety_open_count||0) + (data.violations.ecb_open_count||0);
+    const metaParts = [];
+    if (p.address) metaParts.push(p.address + (p.borough ? ', '+p.borough : ''));
+    metaParts.push(`${data.permits.open_count} open BIS permit${data.permits.open_count!==1?'s':''}`);
+    metaParts.push(`${totalOpen} open violation${totalOpen!==1?'s':''}`);
+    document.getElementById('reportMeta').textContent = metaParts.join(' · ');
+    renderBINChips(data.bins);
+    renderBISPermitsTab(data.permits);
+    renderDOTPermitsTab(data.dot_permits);
+    renderViolationsTab(data.violations.dob, data.violations.dob_open);
+    renderECBTab(data.violations.ecb, data.violations.ecb_open);
+    renderComplaintsTab(data.complaints);
+    renderElectricalTab(data.electrical);
+    renderElevatorTab(data.elevator);
+    renderChecklistTab(data.tco_items, project_id);
+    showToast('Report loaded', 'success');
+  } catch(e) { showToast('Failed to load report: ' + e.message, 'error'); }
+}
+
+function renderBINChips(bins) {
+  const container = document.getElementById('reportBINs');
+  if (!bins || !bins.length) {
+    container.innerHTML = '<span style="color:var(--text-muted);font-size:11px">No BINs added</span>';
+    return;
+  }
+  container.innerHTML = bins.map(b => {
+    const bisUrl = `https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet?bin=${b.bin}&go=1`;
+    return `<span class="bin-chip${b.is_primary ? ' bin-chip-primary' : ''}">
+      <a href="${bisUrl}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">BIN ${b.bin}</a>
+      ${b.label        ? `<span class="bin-chip-label">${b.label}</span>` : ''}
+      ${b.dob_job_number ? `<span class="bin-chip-label">Job# ${b.dob_job_number}</span>` : ''}
+      <button class="bin-chip-btn" title="Edit BIN"
+        onclick="openEditBINModal('${b.bin}','${(b.label||'').replace(/'/g,"\\'")}','${(b.dob_job_number||'').replace(/'/g,"\\'")}')">✏</button>
+      <button class="bin-chip-btn" title="Remove BIN" style="color:var(--open)"
+        onclick="removeBIN('${b.bin}')">✕</button>
+    </span>`;
+  }).join('');
+}
+
+function showProjectsList() {
+  currentProjectId   = null;
+  currentProjectData = null;
+  document.getElementById('binReport').style.display    = 'none';
+  document.getElementById('projectsList').style.display = 'block';
+}
+
+async function refreshBINReport() { if (currentProjectId) await showProject(currentProjectId); }
+
+function showReportTab(tabId, btn) {
+  document.querySelectorAll('.report-tab-content').forEach(t => t.style.display = 'none');
+  document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active-tab'));
+  document.getElementById(tabId).style.display = 'block';
+  if (btn) btn.classList.add('active-tab');
+}
+
+function toggleSection(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+// ── RENDER: DOB NOW Tab ──────────────────────────────────────────────────────
+function renderDOBNOWTab(dobnow) {
+  const el = document.getElementById('tab-dobnow');
+  if (!dobnow || !dobnow.all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No DOB NOW filings found for this project.</div>';
+    return;
+  }
+  const active = dobnow.active;
+  const closed = dobnow.all.filter(d => !active.includes(d));
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${dobnow.active_count>0?'bin-stat-open':''}">${dobnow.active_count}</span><span class="bin-stat-lbl">Active</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${closed.length}</span><span class="bin-stat-lbl">Approved / Closed</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${dobnow.total}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>`;
+  if (active.length) {
+    html += `<div class="bin-section">
+      <div class="bin-section-header"><span>Active / In-Review Filings</span><span class="bin-section-count">${active.length}</span></div>
+      <table class="bin-table"><thead><tr>
+        <th>Filing #</th><th>BIN</th><th>Type</th><th>Work Types</th><th>Status</th><th>Filed</th><th>Owner / Business</th><th>Special Insp. Req.</th><th>SI Agency #</th>
+      </tr></thead><tbody>`;
+    active.forEach(d => {
+      const wt = [d.general_construction_work_type_, d.mechanical_systems_work_type_, d.plumbing_work_type, d.structural_work_type_].filter(Boolean).join('; ');
+      const siReq = d.special_inspection_requirement || '—';
+      const siAgency = d.special_inspection_agency_number || '—';
+      const siStyle = siReq !== '—' ? 'color:var(--accent);font-weight:600' : 'color:var(--text-muted)';
+      html += `<tr>
+        <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+        <td class="mono" style="font-size:10px">${dobLink('bin', d.bin||'')}</td>
+        <td style="font-size:11px">${d.job_type||'—'}</td>
+        <td style="font-size:11px;max-width:200px;white-space:normal">${wt||'—'}</td>
+        <td><span class="badge badge-pending" style="font-size:9px">${d.filing_status||'—'}</span></td>
+        <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;max-width:160px;white-space:normal">${d.owner_s_business_name||'—'}</td>
+        <td style="font-size:11px;${siStyle}">${siReq}</td>
+        <td class="mono" style="font-size:10px">${siAgency}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  } else {
+    html += '<div style="padding:.75rem 1rem;color:var(--resolved);font-size:12px">✓ No active DOB NOW filings.</div>';
+  }
+  if (closed.length) {
+    html += `<div class="bin-section">
+      <div class="bin-section-header" onclick="toggleSection('dobnow-closed')" style="cursor:pointer">
+        <span>Approved / Signed Off / Closed</span>
+        <span style="display:flex;align-items:center;gap:8px"><span class="bin-section-count">${closed.length}</span><span style="color:var(--text-muted)">▾</span></span>
+      </div>
+      <div id="dobnow-closed" style="display:none">
+        <table class="bin-table"><thead><tr>
+          <th>Filing #</th><th>BIN</th><th>Type</th><th>Status</th><th>Filed</th><th>Signoff</th>
+        </tr></thead><tbody>`;
+    closed.forEach(d => {
+      html += `<tr style="opacity:.55">
+        <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+        <td class="mono" style="font-size:10px">${d.bin||'—'}</td>
+        <td style="font-size:11px">${d.job_type||'—'}</td>
+        <td><span class="badge badge-resolved" style="font-size:9px">${d.filing_status||'—'}</span></td>
+        <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px">${(d.signoff_date||'').slice(0,10)||'—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div></div>';
+  }
+  el.innerHTML = html;
+}
+
+// ── RENDER: DOB NOW Approved Permits Tab ─────────────────────────────────────
+function nowPermitBadge(st) {
+  const s = String(st||'').toUpperCase();
+  // DOB NOW Approved Permits actual status values from API
+  if (s.includes('ISSUED') || s.includes('RENEWED') || s === 'ACTIVE')  return 'badge-resolved';
+  if (s.includes('EXPIRED'))                                              return 'badge-open';
+  if (s.includes('SIGNED') || s.includes('SIGNOFF') || s.includes('SIGN OFF')) return 'badge-closed';
+  if (s.includes('CANCEL') || s.includes('WITHDRAWN') || s.includes('SUPERSED')) return 'badge-closed';
+  return 'badge-pending';
+}
+
+function _nowIsActive(st)    { const s=st.toUpperCase(); return s.includes('ISSUED') || s.includes('RENEWED') || s==='ACTIVE'; }
+function _nowIsExpired(st)   { return st.toUpperCase().includes('EXPIRED'); }
+function _nowIsSignedOff(st) { const s=st.toUpperCase(); return s.includes('SIGNED') || s.includes('SIGNOFF'); }
+function _nowIsCancelled(st) { const s=st.toUpperCase(); return s.includes('CANCEL') || s.includes('WITHDRAWN') || s.includes('SUPERSED'); }
+
+function filterNOWPermits(filter) {
+  document.querySelectorAll('#now-permit-rows tr').forEach(tr => {
+    const st = tr.dataset.status || '';
+    let show = filter === 'all';
+    if (!show) {
+      if (filter === 'active')    show = _nowIsActive(st);
+      if (filter === 'expired')   show = _nowIsExpired(st);
+      if (filter === 'signedoff') show = _nowIsSignedOff(st);
+      if (filter === 'cancelled') show = _nowIsCancelled(st);
+      if (filter === 'pending')   show = !_nowIsActive(st) && !_nowIsExpired(st) && !_nowIsSignedOff(st) && !_nowIsCancelled(st);
+    }
+    tr.style.display = show ? '' : 'none';
+  });
+  document.querySelectorAll('#now-filter-pills .filter-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.filter === filter));
+}
+
+function renderDOBNOWPermitsTab(dp) {
+  const el = document.getElementById('tab-dobnow-permits');
+  if (!dp || !dp.total) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No DOB NOW approved permits found for this project.</div>';
+    return;
+  }
+  const all        = dp.all;
+  const activeCnt  = all.filter(p => _nowIsActive(p.permit_status||'')).length;
+  const expiredCnt = all.filter(p => _nowIsExpired(p.permit_status||'')).length;
+  const sofCnt     = all.filter(p => _nowIsSignedOff(p.permit_status||'')).length;
+  const cancelCnt  = all.filter(p => _nowIsCancelled(p.permit_status||'')).length;
+  const pendingCnt = dp.total - activeCnt - expiredCnt - sofCnt - cancelCnt;
+
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${activeCnt>0?'bin-stat-resolved':''}">${activeCnt}</span><span class="bin-stat-lbl">Active / Issued</span></div>
+    <div class="bin-stat"><span class="bin-stat-val ${expiredCnt>0?'bin-stat-open':''}">${expiredCnt}</span><span class="bin-stat-lbl">Expired</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${sofCnt}</span><span class="bin-stat-lbl">Signed Off</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${cancelCnt}</span><span class="bin-stat-lbl">Cancelled</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${dp.total}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>
+  <div class="filter-pills" id="now-filter-pills">
+    <button class="filter-pill active" data-filter="all"       onclick="filterNOWPermits('all')">All (${dp.total})</button>
+    <button class="filter-pill"        data-filter="active"    onclick="filterNOWPermits('active')">Active / Issued (${activeCnt})</button>
+    <button class="filter-pill"        data-filter="expired"   onclick="filterNOWPermits('expired')">Expired (${expiredCnt})</button>
+    <button class="filter-pill"        data-filter="signedoff" onclick="filterNOWPermits('signedoff')">Signed Off (${sofCnt})</button>
+    <button class="filter-pill"        data-filter="cancelled" onclick="filterNOWPermits('cancelled')">Cancelled (${cancelCnt})</button>
+    ${pendingCnt ? `<button class="filter-pill" data-filter="pending" onclick="filterNOWPermits('pending')">Other (${pendingCnt})</button>` : ''}
+  </div>
+  <div class="bin-section">
+    <table class="bin-table">
+      <thead><tr>
+        <th>Filing #</th><th>Work Permit</th><th>Seq</th><th>Status</th>
+        <th>Job Description</th><th>Filing Reason</th><th>Approved</th><th>Issued</th><th>Expires</th>
+      </tr></thead>
+      <tbody id="now-permit-rows">`;
+
+  all.forEach(p => {
+    const st      = (p.permit_status || '').toUpperCase();
+    const badge   = nowPermitBadge(st);
+    const isDim   = _nowIsExpired(st) || _nowIsSignedOff(st) || _nowIsCancelled(st);
+    const expires = (p.expired_date||'').slice(0,10);
+    const expStyle = st === 'EXPIRED' ? 'color:var(--open);font-weight:600' : '';
+    html += `<tr data-status="${st}" ${isDim ? 'style="opacity:.6"' : ''}>
+      <td class="mono" style="font-size:10px">${dobLink('job', p.job_filing_number||'—')}</td>
+      <td class="mono" style="font-size:10px">${p.work_permit||'—'}</td>
+      <td class="mono" style="font-size:10px">${p.sequence_number||'—'}</td>
+      <td><span class="badge ${badge}" style="font-size:9px">${p.permit_status||'—'}</span></td>
+      <td style="font-size:11px;max-width:220px;white-space:normal">${p.job_description||'—'}</td>
+      <td style="font-size:11px;max-width:140px;white-space:normal">${p.filing_reason||'—'}</td>
+      <td style="font-size:11px">${(p.approved_date||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px">${(p.issued_date||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px;${expStyle}">${expires||'—'}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+// ── RENDER: BIS Permits Tab ──────────────────────────────────────────────────
+function bisPermitBadge(st) {
+  if (st === 'ISSUED' || st === 'RENEWED')   return 'badge-resolved';
+  if (st === 'EXPIRED')                       return 'badge-open';
+  if (st === 'SIGNED OFF' || st === 'CANCELLED' || st === 'WITHDRAWN') return 'badge-closed';
+  return 'badge-pending';
+}
+
+function filterBISPermits(filter) {
+  document.querySelectorAll('#bis-permit-rows tr').forEach(tr => {
+    const st = tr.dataset.status || '';
+    let show = filter === 'all';
+    if (!show) {
+      if (filter === 'issued')    show = st === 'ISSUED' || st === 'RENEWED';
+      if (filter === 'expired')   show = st === 'EXPIRED';
+      if (filter === 'signedoff') show = st === 'SIGNED OFF';
+      if (filter === 'cancelled') show = st === 'CANCELLED' || st === 'WITHDRAWN';
+    }
+    tr.style.display = show ? '' : 'none';
+  });
+  document.querySelectorAll('#bis-filter-pills .filter-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.filter === filter));
+}
+
+function renderBISPermitsTab(permits) {
+  const el = document.getElementById('tab-permits');
+  if (!permits.all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No BIS permits found for this project.</div>';
+    return;
+  }
+  const all    = permits.all;
+  const open   = permits.open;
+  const closed = all.filter(p => !open.includes(p));
+  const issuedCnt  = all.filter(p => ['ISSUED','RENEWED'].includes((p.permit_status||'').toUpperCase())).length;
+  const expiredCnt = all.filter(p => (p.permit_status||'').toUpperCase() === 'EXPIRED').length;
+  const sofCnt     = all.filter(p => ['SIGNED OFF','CANCELLED','WITHDRAWN'].includes((p.permit_status||'').toUpperCase())).length;
+
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${permits.open_count>0?'bin-stat-open':'bin-stat-resolved'}">${permits.open_count}</span><span class="bin-stat-lbl">Active</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-open">${expiredCnt}</span><span class="bin-stat-lbl">Expired</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${sofCnt}</span><span class="bin-stat-lbl">Signed Off / Closed</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${permits.total}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>
+  <div class="filter-pills" id="bis-filter-pills">
+    <button class="filter-pill active" data-filter="all"       onclick="filterBISPermits('all')">All (${all.length})</button>
+    <button class="filter-pill"        data-filter="issued"    onclick="filterBISPermits('issued')">Issued / Renewed (${issuedCnt})</button>
+    <button class="filter-pill"        data-filter="expired"   onclick="filterBISPermits('expired')">Expired (${expiredCnt})</button>
+    <button class="filter-pill"        data-filter="signedoff" onclick="filterBISPermits('signedoff')">Signed Off / Cancelled (${sofCnt})</button>
+  </div>
+  <div class="bin-section">
+    <table class="bin-table">
+      <thead><tr>
+        <th>Job #</th><th>Subcontractor / Permittee</th><th>Permit Type</th>
+        <th>Work Type</th><th>Status</th><th>Issued</th><th>Expires</th>
+      </tr></thead>
+      <tbody id="bis-permit-rows">`;
+
+  all.forEach(p => {
+    const jn    = p.job__ || '';
+    const st    = (p.permit_status || '').toUpperCase();
+    const sc    = bisPermitBadge(st);
+    const ptLbl = PERMIT_TYPE_LABELS[p.permit_type] || p.permit_type || '—';
+    const expDt = (p.expiration_date || '').slice(0,10);
+    const expStyle = expDt && new Date(expDt) < new Date() ? 'color:var(--open);font-weight:600' : '';
+    html += `<tr data-status="${st}">
+      <td class="mono" style="font-size:10px">${jn ? dobLink('job',jn) : '—'}</td>
+      <td style="font-size:11px;max-width:160px;white-space:normal">${p.permittee_s_business_name||'—'}</td>
+      <td><span class="badge badge-pending" style="font-size:9px" title="${ptLbl}">${p.permit_type||'—'}</span></td>
+      <td style="max-width:160px;white-space:normal;font-size:11px">${p.work_type||'—'}</td>
+      <td><span class="badge ${sc}" style="font-size:9px">${st||'—'}</span></td>
+      <td style="font-size:11px">${(p.issuance_date||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px;${expStyle}">${expDt||'—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+// ── RENDER: DOT Permits Tab ──────────────────────────────────────────────────
+function renderDOTPermitsTab(dot) {
+  const el = document.getElementById('tab-dot');
+  if (!dot || !dot.all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No DOT Street Construction Permits found for this address.</div>';
+    return;
+  }
+  const open   = dot.open;
+  const closed = dot.all.filter(d => !open.includes(d));
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${dot.open_count>0?'bin-stat-open':''}">${dot.open_count}</span><span class="bin-stat-lbl">Active</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${closed.length}</span><span class="bin-stat-lbl">Expired / Closed</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${dot.total}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>`;
+  if (open.length) {
+    html += `<div class="bin-section">
+      <div class="bin-section-header"><span>Active DOT Permits</span><span class="bin-section-count">${open.length}</span></div>
+      <table class="bin-table"><thead><tr>
+        <th>Permit #</th><th>Permittee</th><th>Type</th><th>Equipment/Work</th><th>Start</th><th>End</th><th>Status</th>
+      </tr></thead><tbody>`;
+    open.forEach(d => {
+      html += `<tr>
+        <td class="mono" style="font-size:10px">${d.permitnumber||'—'}</td>
+        <td style="font-size:11px;max-width:140px;white-space:normal">${d.permitteename||'—'}</td>
+        <td style="font-size:11px">${d.permittypedesc||'—'}</td>
+        <td style="font-size:11px;max-width:160px;white-space:normal">${d.equipmenttypedesc||'—'}</td>
+        <td style="font-size:11px">${(d.issuedworkstartdate||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px">${(d.issuedworkenddate||'').slice(0,10)||'—'}</td>
+        <td><span class="badge badge-open" style="font-size:9px">${d.permitstatusshortdesc||'—'}</span></td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  } else {
+    html += '<div style="padding:.75rem 1rem;color:var(--resolved);font-size:12px">✓ No active DOT permits.</div>';
+  }
+  if (closed.length) {
+    html += `<div class="bin-section">
+      <div class="bin-section-header" onclick="toggleSection('dot-closed')" style="cursor:pointer">
+        <span>Expired / Closed DOT Permits</span>
+        <span style="display:flex;align-items:center;gap:8px"><span class="bin-section-count">${closed.length}</span><span style="color:var(--text-muted)">▾</span></span>
+      </div>
+      <div id="dot-closed" style="display:none">
+        <table class="bin-table"><thead><tr>
+          <th>Permit #</th><th>Permittee</th><th>Type</th><th>Start</th><th>End</th><th>Status</th>
+        </tr></thead><tbody>`;
+    closed.forEach(d => {
+      html += `<tr style="opacity:.55">
+        <td class="mono" style="font-size:10px">${d.permitnumber||'—'}</td>
+        <td style="font-size:11px">${d.permitteename||'—'}</td>
+        <td style="font-size:11px">${d.permittypedesc||'—'}</td>
+        <td style="font-size:11px">${(d.issuedworkstartdate||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px">${(d.issuedworkenddate||'').slice(0,10)||'—'}</td>
+        <td><span class="badge badge-resolved" style="font-size:9px">${d.permitstatusshortdesc||'—'}</span></td>
+      </tr>`;
+    });
+    html += '</tbody></table></div></div>';
+  }
+  el.innerHTML = html;
+}
+
+// ── RENDER: DOB Violations Tab ───────────────────────────────────────────────
+function dobViolBadge(cat) {
+  const c = String(cat||'').toUpperCase();
+  if (c.includes('DISMISS')) return 'badge-closed';   // gray
+  return 'badge-resolved';                             // green = active/open
+}
+
+function filterDOBViols(filter) {
+  document.querySelectorAll('#dob-viol-rows tr').forEach(tr => {
+    const type = tr.dataset.vtype || '';
+    let show = filter === 'all';
+    if (!show) {
+      if (filter === 'active')    show = type === 'active';
+      if (filter === 'dismissed') show = type === 'dismissed';
+    }
+    tr.style.display = show ? '' : 'none';
+  });
+  document.querySelectorAll('#dob-viol-filter .filter-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.filter === filter));
+}
+
+function filterSafetyViols(filter) {
+  document.querySelectorAll('#safety-viol-rows tr').forEach(tr => {
+    const type = tr.dataset.stype || '';
+    let show = filter === 'all';
+    if (!show) {
+      if (filter === 'active')   show = type === 'active';
+      if (filter === 'resolved') show = type === 'resolved';
+    }
+    tr.style.display = show ? '' : 'none';
+  });
+  document.querySelectorAll('#safety-viol-filter .filter-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.filter === filter));
+}
+
+function renderViolationsTab(all, open) {
+  const el = document.getElementById('tab-violations');
+
+  if (!all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No DOB violations found for this project.</div>';
+    return;
+  }
+
+  let html = '';
+
+  // ── DOB Civil Violations (3h2n-5cm9) ───────────────────────────────────────
+  if (all.length) {
+    const activeCnt    = all.filter(v => open.includes(v)).length;
+    const dismissedCnt = all.filter(v => String(v.violation_category||'').toUpperCase().includes('DISMISS')).length;
+    const otherCnt     = all.length - activeCnt - dismissedCnt;
+
+    html += `<div style="margin-bottom:4px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;padding:0 2px">DOB Civil Violations</div>
+    <div class="bin-stats-bar">
+      <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${activeCnt}</span><span class="bin-stat-lbl">Active</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${dismissedCnt}</span><span class="bin-stat-lbl">Dismissed</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${otherCnt}</span><span class="bin-stat-lbl">Other Closed</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${all.length}</span><span class="bin-stat-lbl">Total</span></div>
+    </div>
+    <div class="filter-pills" id="dob-viol-filter">
+      <button class="filter-pill active" data-filter="all"       onclick="filterDOBViols('all')">All (${all.length})</button>
+      <button class="filter-pill"        data-filter="active"    onclick="filterDOBViols('active')" style="color:var(--resolved)">Active (${activeCnt})</button>
+      <button class="filter-pill"        data-filter="dismissed" onclick="filterDOBViols('dismissed')">Dismissed (${dismissedCnt})</button>
+    </div>
+    <table class="bin-table">
+      <thead><tr><th>Violation #</th><th>Date</th><th>Category / Status</th><th>Description</th><th>Disposition</th></tr></thead>
+      <tbody id="dob-viol-rows">`;
+
+    all.forEach(v => {
+      const cat = String(v.violation_category||'').toUpperCase();
+      const isDismissed = cat.includes('DISMISS');
+      const isActive    = open.includes(v);
+      const vtype = isDismissed ? 'dismissed' : (isActive ? 'active' : 'closed');
+      const sc    = isDismissed ? 'badge-closed' : 'badge-resolved';
+      const rowStyle = isDismissed ? 'opacity:.6' : '';
+      html += `<tr data-vtype="${vtype}" style="${rowStyle}">
+        <td class="mono" style="font-size:10px">${v.isn_dob_bis_viol||'—'}</td>
+        <td style="font-size:11px">${(v.issue_date||'').slice(0,10)}</td>
+        <td><span class="badge ${sc}" style="font-size:9px">${String(v.violation_category||'').slice(0,35)}</span></td>
+        <td style="font-size:11px;max-width:220px;white-space:normal">${String(v.description||'').slice(0,90)}</td>
+        <td style="font-size:11px;max-width:180px;white-space:normal;color:var(--text-muted)">${String(v.disposition_comments||'').slice(0,70)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+  }
+
+  el.innerHTML = html;
+}
+
+// ── RENDER: ECB Violations Tab ───────────────────────────────────────────────
+// ── ECB status helper ────────────────────────────────────────────────────────
+function ecbStatusBadge(status) {
+  const s = String(status||'').toUpperCase();
+  if (s.includes('RESOLVE') || s.includes('DISMISS') || s.includes('DEFAULT RESOLVE')) return 'badge-closed';
+  if (s.includes('PENDING'))                                                            return 'badge-pending';
+  if (s.includes('CERTIFICATE') && s.includes('REJECT'))                               return 'badge-open';
+  if (s.includes('ACTIVE') || s.includes('HEARING') || s.includes('IN VIOLATION') || s.includes('DEFAULT')) return 'badge-open';
+  return 'badge-pending';
+}
+
+function filterECBViols(filter) {
+  document.querySelectorAll('#ecb-viol-rows tr').forEach(tr => {
+    const type = tr.dataset.etype || '';
+    let show = filter === 'all';
+    if (!show) {
+      if (filter === 'active')         show = type === 'active';
+      if (filter === 'cert-rejected')  show = type === 'cert-rejected';
+      if (filter === 'pending')        show = type === 'pending';
+      if (filter === 'resolved')       show = type === 'resolved';
+      if (filter === 'dismissed')      show = type === 'dismissed';
+    }
+    tr.style.display = show ? '' : 'none';
+  });
+  document.querySelectorAll('#ecb-filter-pills .filter-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.filter === filter));
+}
+
+// ── ECB tab sort state ────────────────────────────────────────────────────────
+let ecbSortCol = 'hearing_date';
+let ecbSortDir = 'desc';
+
+function ecbType(e) {
+  const s = String(e.ecb_violation_status||'').toUpperCase();
+  if (s.includes('RESOLVE') || s.includes('DEFAULT RESOLVE')) return 'resolved';
+  if (s.includes('DISMISS'))                                   return 'dismissed';
+  if (s.includes('PENDING'))                                   return 'pending';
+  if (s.includes('CERTIFICATE') && s.includes('REJECT'))      return 'cert-rejected';
+  return 'active';
+}
+
+function sortECBTab(col, allData) {
+  if (ecbSortCol === col) { ecbSortDir = ecbSortDir === 'asc' ? 'desc' : 'asc'; }
+  else { ecbSortCol = col; ecbSortDir = 'asc'; }
+  renderECBTab(allData);
+}
+
+function renderECBTab(all, open) {
+  const el = document.getElementById('tab-ecb');
+  if (!all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No ECB violations found for this project.</div>';
+    return;
+  }
+
+  // Sort by selected column
+  const sorted = [...all].sort((a,b) => {
+    let va = a[ecbSortCol] || '';
+    let vb = b[ecbSortCol] || '';
+    const cmp = String(va).localeCompare(String(vb), undefined, {numeric: true, sensitivity: 'base'});
+    return ecbSortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const activeCnt      = sorted.filter(e => ecbType(e) === 'active').length;
+  const certRejCnt     = sorted.filter(e => ecbType(e) === 'cert-rejected').length;
+  const pendingCnt     = sorted.filter(e => ecbType(e) === 'pending').length;
+  const resolvedCnt    = sorted.filter(e => ecbType(e) === 'resolved').length;
+  const dismissedCnt   = sorted.filter(e => ecbType(e) === 'dismissed').length;
+  const balTotal       = sorted.reduce((s,e) => s + parseFloat(e.balance_due||0), 0);
+
+  function sortTh(col, label) {
+    const isActive = ecbSortCol === col;
+    const arrow = isActive ? (ecbSortDir === 'asc' ? '▲' : '▼') : '⇅';
+    return `<th style="cursor:pointer;${isActive?'color:var(--accent)':''}" onclick="sortECBTab('${col}', window._ecbAllData)">
+      ${label} <span style="opacity:${isActive?1:.4};font-size:8px">${arrow}</span></th>`;
+  }
+
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${activeCnt>0?'bin-stat-open':''}">${activeCnt}</span><span class="bin-stat-lbl">Active</span></div>
+    ${certRejCnt ? `<div class="bin-stat"><span class="bin-stat-val bin-stat-open">${certRejCnt}</span><span class="bin-stat-lbl">Cert. Rejected</span></div>` : ''}
+    <div class="bin-stat"><span class="bin-stat-val">${pendingCnt}</span><span class="bin-stat-lbl">Pending</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${resolvedCnt+dismissedCnt}</span><span class="bin-stat-lbl">Resolved / Dismissed</span></div>
+    <div class="bin-stat"><span class="bin-stat-val ${balTotal>0?'bin-stat-open':''}" style="font-size:16px">$${balTotal.toFixed(2)}</span><span class="bin-stat-lbl">Balance Due</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${sorted.length}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>
+  <div class="filter-pills" id="ecb-filter-pills">
+    <button class="filter-pill active" data-filter="all"           onclick="filterECBViols('all')">All (${sorted.length})</button>
+    <button class="filter-pill"        data-filter="active"        onclick="filterECBViols('active')" style="color:var(--open)">Active (${activeCnt})</button>
+    ${certRejCnt ? `<button class="filter-pill" data-filter="cert-rejected" onclick="filterECBViols('cert-rejected')" style="color:var(--open)">Cert. Rejected (${certRejCnt})</button>` : ''}
+    <button class="filter-pill"        data-filter="pending"       onclick="filterECBViols('pending')">Pending (${pendingCnt})</button>
+    <button class="filter-pill"        data-filter="resolved"      onclick="filterECBViols('resolved')">Resolved (${resolvedCnt})</button>
+    <button class="filter-pill"        data-filter="dismissed"     onclick="filterECBViols('dismissed')">Dismissed (${dismissedCnt})</button>
+  </div>
+  <table class="bin-table">
+    <thead><tr>
+      ${sortTh('ecb_violation_number','ECB # / Link')}
+      ${sortTh('issue_date','Issue Date')}
+      ${sortTh('hearing_date','Hearing Date')}
+      ${sortTh('violation_type','Type')}
+      <th>Description</th>
+      ${sortTh('ecb_violation_status','Status')}
+      ${sortTh('penality_imposed','Penalty')}
+      ${sortTh('balance_due','Balance Due')}
+    </tr></thead>
+    <tbody id="ecb-viol-rows">`;
+
+  // Store all data for re-sort on header click
+  window._ecbAllData = all;
+
+  sorted.forEach(e => {
+    const ecbNum  = e.ecb_violation_number || '—';
+    const etype   = ecbType(e);
+    const sc      = ecbStatusBadge(e.ecb_violation_status);
+    const balance = parseFloat(e.balance_due || 0);
+    const rowOp   = (etype === 'resolved' || etype === 'dismissed') ? 'opacity:.65;' : '';
+    const desc    = (e.violation_description || '').slice(0, 80) || '—';
+    html += `<tr data-etype="${etype}" style="${rowOp}">
+      <td class="mono" style="font-size:10px">${ecbNum !== '—' ? dobLink('ecb', ecbNum) : '—'}</td>
+      <td style="font-size:11px">${(e.issue_date||'').slice(0,10)}</td>
+      <td style="font-size:11px;font-family:var(--font-mono)">${(e.hearing_date||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px;max-width:120px;white-space:normal">${e.violation_type||'—'}</td>
+      <td style="font-size:11px;max-width:200px;white-space:normal" title="${e.violation_description||''}">${desc}</td>
+      <td><span class="badge ${sc}" style="font-size:9px">${String(e.ecb_violation_status||'').slice(0,30)}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px">${e.penality_imposed ? '$'+e.penality_imposed : '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;${balance>0?'color:var(--open)':'color:var(--resolved)'}">${balance>0 ? '$'+balance.toFixed(2) : '✓ $0'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ── Complaint detail modal ────────────────────────────────────────────────────
+let _complaintDetail = null;
+function openComplaintModal(idx) {
+  const c = _complaintDetail[idx];
+  if (!c) return;
+  const addr = [c.house_number, c.house_street].filter(Boolean).join(' ') || '—';
+  const fields = [
+    ['Complaint #',       c.complaint_number],
+    ['Date Entered',      (c.date_entered||'').slice(0,10)],
+    ['Address',           addr],
+    ['BIN',               c.bin],
+    ['Community Board',   c.community_board],
+    ['Category Code',     c.complaint_category],
+    ['Description',       c.complaint_category_name || c.complaint_category_description],
+    ['Unit',              c.unit],
+    ['Special District',  c.special_district],
+    ['Status',            c.status],
+    ['Disposition Code',  c.disposition_code],
+    ['Disposition Date',  (c.disposition_date||'').slice(0,10)],
+    ['Inspection Date',   (c.inspection_date||'').slice(0,10)],
+    ['Dobrundate',        (c.dobrundate||'').slice(0,10)],
+  ].filter(([,v]) => v && String(v).trim());
+
+  document.getElementById('complaintModalBody').innerHTML =
+    `<dl style="display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:12px">` +
+    fields.map(([k,v]) =>
+      `<dt style="color:var(--text-muted);font-weight:600">${k}</dt><dd>${v}</dd>`
+    ).join('') + `</dl>`;
+  document.getElementById('complaintModal').classList.add('visible');
+}
+function closeComplaintModal() { document.getElementById('complaintModal').classList.remove('visible'); }
+
+// ── RENDER: DOB Complaints Tab ───────────────────────────────────────────────
+function renderComplaintsTab(data) {
+  const el = document.getElementById('tab-complaints');
+  const all  = (data && data.all)  || [];
+  const open = (data && data.open) || [];
+  if (!all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No DOB complaints found for this project.</div>';
+    return;
+  }
+  _complaintDetail = all;
+  const closed = all.filter(c => String(c.status||'').toUpperCase() === 'CLOSED');
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${open.length>0?'bin-stat-open':''}">${open.length}</span><span class="bin-stat-lbl">Open</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${closed.length}</span><span class="bin-stat-lbl">Closed</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${all.length}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>
+  <table class="bin-table">
+    <thead><tr>
+      <th>Complaint #</th><th>Date Entered</th><th>Address</th><th>Category</th>
+      <th>Community Board</th><th>Unit</th><th>Status</th><th>Disposition</th><th>Inspection Date</th><th></th>
+    </tr></thead><tbody>`;
+  all.forEach((c, idx) => {
+    const isOpen  = String(c.status||'').toUpperCase() !== 'CLOSED';
+    const rowOp   = isOpen ? '' : 'opacity:.65;';
+    const statusBadge = isOpen
+      ? `<span class="badge badge-open"><span class="badge-dot"></span>Open</span>`
+      : `<span class="badge badge-resolved"><span class="badge-dot"></span>Closed</span>`;
+    const addr = [c.house_number, c.house_street].filter(Boolean).join(' ') || '—';
+    html += `<tr style="${rowOp}">
+      <td class="mono" style="font-size:10px">${c.complaint_number||'—'}</td>
+      <td style="font-size:11px">${(c.date_entered||'').slice(0,10)}</td>
+      <td style="font-size:11px;white-space:nowrap">${addr}</td>
+      <td style="font-size:11px" title="${c.complaint_category_name||c.complaint_category_description||''}">${c.complaint_category||'—'}</td>
+      <td style="font-size:11px;text-align:center">${c.community_board||'—'}</td>
+      <td style="font-size:11px">${c.unit||'—'}</td>
+      <td>${statusBadge}</td>
+      <td style="font-size:11px">${c.disposition_code||'—'}</td>
+      <td style="font-size:11px">${(c.inspection_date||'').slice(0,10)||'—'}</td>
+      <td><button class="btn btn-sm" onclick="openComplaintModal(${idx})" style="font-size:10px;padding:2px 8px">View</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ── RENDER: Electrical Permits Tab ───────────────────────────────────────────
+function renderElectricalTab(data) {
+  const el  = document.getElementById('tab-electrical');
+  const all  = (data && data.all)  || [];
+  const open = (data && data.open) || [];
+  if (!all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No electrical permit applications found for this project.</div>';
+    return;
+  }
+  const ELEC_CLOSED = new Set(['PERMIT EXPIRED','JOB SIGNED-OFF','WITHDRAWN','DISAPPROVED','CANCELLED']);
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${open.length>0?'bin-stat-open':''}">${open.length}</span><span class="bin-stat-lbl">Active</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${all.length - open.length}</span><span class="bin-stat-lbl">Closed</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${all.length}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>
+  <table class="bin-table">
+    <thead><tr>
+      <th>Job Filing #</th><th>Filing Date</th><th>Firm</th><th>Work Type</th>
+      <th>Description</th><th>Filing Status</th><th>Permit Issued</th><th>Expiry</th><th>Amt Due</th>
+    </tr></thead><tbody>`;
+  all.forEach(e => {
+    const isClosed = ELEC_CLOSED.has(String(e.filing_status||'').toUpperCase());
+    const rowOp    = isClosed ? 'opacity:.65;' : '';
+    const sc       = isClosed ? 'badge-resolved' : (String(e.filing_status||'').toUpperCase().includes('ISSUE') ? 'badge-open' : 'badge-pending');
+    const due      = parseFloat(e.amount_due||0);
+    html += `<tr style="${rowOp}">
+      <td class="mono" style="font-size:10px">${dobLink('job', e.job_filing_number||'—')}</td>
+      <td style="font-size:11px">${(e.filing_date||'').slice(0,10)}</td>
+      <td style="font-size:11px;max-width:130px;white-space:normal">${e.firm_name||'—'}</td>
+      <td style="font-size:11px;max-width:120px;white-space:normal">${e.category_work_list||'—'}</td>
+      <td style="font-size:11px;max-width:180px;white-space:normal" title="${e.job_description||''}">${(e.job_description||'').slice(0,60)||'—'}</td>
+      <td><span class="badge ${sc}" style="font-size:9px">${(e.filing_status||'—').slice(0,25)}</span></td>
+      <td style="font-size:11px">${(e.permit_issued_date||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px">${(e.completion_date||'').slice(0,10)||'—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;${due>0?'color:var(--open)':''}">${due>0?'$'+due.toFixed(2):'✓'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ── RENDER: Elevator Permits Tab ─────────────────────────────────────────────
+function renderElevatorTab(data) {
+  const el  = document.getElementById('tab-elevator');
+  const all  = (data && data.all)  || [];
+  const open = (data && data.open) || [];
+  if (!all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No elevator permit applications found for this project.</div>';
+    return;
+  }
+  const ELEV_DONE = new Set(['JOB SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN','CANCELLED','DISAPPROVED']);
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${open.length>0?'bin-stat-open':''}">${open.length}</span><span class="bin-stat-lbl">Active</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${all.length - open.length}</span><span class="bin-stat-lbl">Closed</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${all.length}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>
+  <table class="bin-table">
+    <thead><tr>
+      <th>Job Filing #</th><th>Filing Date</th><th>Device Type</th><th>Applicant / Business</th>
+      <th>Work Description</th><th>Filing Status</th><th>Est. Cost</th><th>Amt Due</th>
+    </tr></thead><tbody>`;
+  all.forEach(e => {
+    const statusUp = String(e.filing_status||'').toUpperCase();
+    const isClosed = ELEV_DONE.has(statusUp);
+    const rowOp    = isClosed ? 'opacity:.65;' : '';
+    const sc       = isClosed ? 'badge-resolved' : (statusUp.includes('ISSUED') ? 'badge-open' : 'badge-pending');
+    const due      = parseFloat(e.amount_due||0);
+    const cost     = parseFloat(e.estimated_cost||0);
+    html += `<tr style="${rowOp}">
+      <td class="mono" style="font-size:10px">${dobLink('job', e.job_filing_number||'—')}</td>
+      <td style="font-size:11px">${(e.filing_date||'').slice(0,10)}</td>
+      <td style="font-size:11px;max-width:110px;white-space:normal">${e.elevatordevicetype||e.device_type||'—'}</td>
+      <td style="font-size:11px;max-width:150px;white-space:normal">${e.applicant_businessname||e.applicant_business_name||'—'}</td>
+      <td style="font-size:11px;max-width:200px;white-space:normal" title="${e.descriptionofwork||e.description_of_work||''}">${(e.descriptionofwork||e.description_of_work||'').slice(0,70)||'—'}</td>
+      <td><span class="badge ${sc}" style="font-size:9px">${(e.filing_status||'—').slice(0,25)}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px">${cost>0?'$'+cost.toLocaleString('en-US',{minimumFractionDigits:0}):'—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;${due>0?'color:var(--open)':''}">${due>0?'$'+due.toFixed(2):'✓'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ── RENDER: TCO Checklist Tab ────────────────────────────────────────────────
+function renderChecklistTab(items, project_id) {
+  const el = document.getElementById('tab-checklist');
+  const sections = ['construction','plumbing','elevator','technical','bis','other'];
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <div style="font-size:12px;color:var(--text-muted)">${items.length} tracked item${items.length!==1?'s':''}</div>
+    <button class="btn btn-sm btn-accent" onclick="openAddTCOModal(${project_id})">+ Add Item</button>
+  </div>`;
+  sections.forEach(sec => {
+    const secItems    = items.filter(i => i.section === sec);
+    const openCnt     = secItems.filter(i => i.status === 'open').length;
+    const pendCnt     = secItems.filter(i => i.status === 'pending').length;
+    const resolvedCnt = secItems.filter(i => i.status === 'resolved').length;
+    if (!secItems.length && sec !== 'construction') return;
+    html += `<div class="bin-section">
+      <div class="bin-section-header">
+        <span>${TCO_SECTION_LABELS[sec]}</span>
+        <span style="display:flex;align-items:center;gap:5px">
+          ${openCnt   ? `<span class="badge badge-open"    style="font-size:9px">${openCnt} open</span>`    : ''}
+          ${pendCnt   ? `<span class="badge badge-pending" style="font-size:9px">${pendCnt} pending</span>` : ''}
+          ${!secItems.length ? '<span style="color:var(--resolved);font-size:11px">✓ Clear</span>' : ''}
+          ${secItems.length && !openCnt && !pendCnt ? `<span style="color:var(--resolved);font-size:11px">✓ ${resolvedCnt} resolved</span>` : ''}
+        </span>
+      </div>`;
+    if (secItems.length) {
+      html += `<table class="bin-table"><thead><tr><th>Ref</th><th>Description</th><th>Responsible</th><th>Status</th><th>Notes</th><th></th></tr></thead><tbody>`;
+      secItems.forEach(item => {
+        html += `<tr id="tco-row-${item.id}">
+          <td class="mono" style="font-size:10px;white-space:nowrap">${item.item_ref||'—'}</td>
+          <td style="font-size:12px;max-width:200px;white-space:normal">${item.description}</td>
+          <td style="font-size:11px;color:var(--text-muted)">${item.responsible_party||'—'}</td>
+          <td><select class="tco-status-select" onchange="updateTCOStatus(${item.id},this.value)">
+            <option value="open"     ${item.status==='open'?'selected':''}>Open</option>
+            <option value="pending"  ${item.status==='pending'?'selected':''}>Pending</option>
+            <option value="resolved" ${item.status==='resolved'?'selected':''}>Resolved</option>
+          </select></td>
+          <td style="font-size:11px;color:var(--text-muted);max-width:160px;white-space:normal">${item.notes||'—'}</td>
+          <td><button class="btn btn-sm" onclick="deleteTCOItem(${item.id})"
+            style="color:var(--open);border-color:transparent;background:transparent;padding:2px 6px">✕</button></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+// ── Add / Save Project ───────────────────────────────────────────────────────
+function openAddProjectModal()  { document.getElementById('addProjectModal').classList.add('visible'); }
+function closeAddProjectModal() { document.getElementById('addProjectModal').classList.remove('visible'); }
+
+async function saveProject() {
+  const name = document.getElementById('newProjectName').value.trim();
+  if (!name) { showToast('Project Name is required', 'error'); return; }
+  try {
+    const res = await fetch('/api/projects', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        project_name: name,
+        address:  document.getElementById('newAddress').value.trim(),
+        borough:  document.getElementById('newBorough').value,
+        notes:    document.getElementById('newProjectNotes').value.trim()
+      })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    closeAddProjectModal();
+    ['newProjectName','newAddress','newProjectNotes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('newBorough').value = '';
+    showToast(`Project "${name}" created!`, 'success');
+    loadProjects();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Edit Project ─────────────────────────────────────────────────────────────
+function openEditProjectModal() {
+  if (!currentProjectData) return;
+  const p = currentProjectData.project;
+  document.getElementById('editProjectId').value    = p.id;
+  document.getElementById('editProjectName').value  = p.project_name || '';
+  document.getElementById('editAddress').value      = p.address || '';
+  document.getElementById('editBorough').value      = p.borough || '';
+  document.getElementById('editProjectNotes').value = p.notes || '';
+  document.getElementById('editProjectModal').classList.add('visible');
+}
+function closeEditProjectModal() { document.getElementById('editProjectModal').classList.remove('visible'); }
+
+async function saveEditProject() {
+  const id   = document.getElementById('editProjectId').value;
+  const name = document.getElementById('editProjectName').value.trim();
+  if (!name) { showToast('Project Name is required', 'error'); return; }
+  try {
+    const res = await fetch(`/api/projects/${id}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        project_name: name,
+        address:  document.getElementById('editAddress').value.trim(),
+        borough:  document.getElementById('editBorough').value,
+        notes:    document.getElementById('editProjectNotes').value.trim()
+      })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    closeEditProjectModal();
+    showToast('Project updated', 'success');
+    await showProject(currentProjectId);
+    loadProjects();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Delete Project ────────────────────────────────────────────────────────────
+async function deleteProject() {
+  if (!currentProjectId) return;
+  const name = currentProjectData?.project?.project_name || `#${currentProjectId}`;
+  if (!confirm(`Delete project "${name}"?\nThis will remove all BINs and TCO items.`)) return;
+  try {
+    await fetch(`/api/projects/${currentProjectId}`, {method:'DELETE'});
+    showToast('Project deleted', 'success');
+    showProjectsList();
+    loadProjects();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteProjectById(id, name) {
+  if (!confirm(`Delete project "${name}"?\nThis will remove all BINs and TCO items.`)) return;
+  try {
+    await fetch(`/api/projects/${id}`, {method:'DELETE'});
+    showToast('Project deleted', 'success');
+    loadProjects();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── BIN Management ────────────────────────────────────────────────────────────
+function openAddBINModal() {
+  ['addBINNumber','addBINLabel','addBINJobNumber'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('addBINModal').classList.add('visible');
+}
+function closeAddBINModal() { document.getElementById('addBINModal').classList.remove('visible'); }
+
+async function saveAddBIN() {
+  const bin = document.getElementById('addBINNumber').value.trim();
+  if (!bin) { showToast('BIN Number is required', 'error'); return; }
+  try {
+    const res = await fetch(`/api/projects/${currentProjectId}/bins`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        bin,
+        label:          document.getElementById('addBINLabel').value.trim(),
+        dob_job_number: document.getElementById('addBINJobNumber').value.trim()
+      })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    closeAddBINModal();
+    showToast(`BIN ${bin} added`, 'success');
+    await showProject(currentProjectId);
+    loadProjects();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function openEditBINModal(bin_num, label, dob_job_number) {
+  document.getElementById('editBINOld').value       = bin_num;
+  document.getElementById('editBINNumber').value    = bin_num;
+  document.getElementById('editBINLabel').value     = label || '';
+  document.getElementById('editBINJobNumber').value = dob_job_number || '';
+  document.getElementById('editBINModal').classList.add('visible');
+}
+function closeEditBINModal() { document.getElementById('editBINModal').classList.remove('visible'); }
+
+async function saveEditBIN() {
+  const old_bin = document.getElementById('editBINOld').value;
+  const new_bin = document.getElementById('editBINNumber').value.trim();
+  if (!new_bin) { showToast('BIN Number is required', 'error'); return; }
+  try {
+    const res = await fetch(`/api/projects/${currentProjectId}/bins/${encodeURIComponent(old_bin)}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        bin:            new_bin,
+        label:          document.getElementById('editBINLabel').value.trim(),
+        dob_job_number: document.getElementById('editBINJobNumber').value.trim()
+      })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    closeEditBINModal();
+    showToast('BIN updated', 'success');
+    await showProject(currentProjectId);
+    loadProjects();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function removeBIN(bin_num) {
+  if (!confirm(`Remove BIN ${bin_num} from this project?`)) return;
+  try {
+    const res = await fetch(`/api/projects/${currentProjectId}/bins/${encodeURIComponent(bin_num)}`, {method:'DELETE'});
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    showToast(`BIN ${bin_num} removed`, 'success');
+    await showProject(currentProjectId);
+    loadProjects();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── Add / Save TCO Item ───────────────────────────────────────────────────────
+function openAddTCOModal(project_id) {
+  document.getElementById('tcoItemProjectId').value = project_id;
+  document.getElementById('addTCOItemModal').classList.add('visible');
+}
+function closeAddTCOModal() { document.getElementById('addTCOItemModal').classList.remove('visible'); }
+
+// ── SETTINGS MODAL ──────────────────────────────────────────────────────────
+function openSettingsModal() {
+  document.getElementById('settCompanyName').value = document.querySelector('.logo-text').textContent.trim();
+  document.getElementById('settSearchTerm').value  = document.getElementById('searchInput').value.trim();
+  document.getElementById('settingsModal').classList.add('visible');
+}
+function closeSettingsModal() { document.getElementById('settingsModal').classList.remove('visible'); }
+
+async function saveSettings() {
+  const companyName = document.getElementById('settCompanyName').value.trim();
+  const searchTerm  = document.getElementById('settSearchTerm').value.trim();
+  if (!searchTerm) { showToast('Search term cannot be empty', 'error'); return; }
+  try {
+    const res  = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ company_name: companyName, search_term: searchTerm })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error('Save failed');
+    if (companyName) document.querySelector('.logo-text').textContent = companyName;
+    currentSearchTerm = searchTerm;
+    document.getElementById('searchInput').value = '';
+    clientSearchTerm = '';
+    closeSettingsModal();
+    showToast('Settings saved — refreshing data…', 'success');
+    allData = {};
+    fetchAll();
+  } catch(e) {
+    showToast('Failed to save settings: ' + e.message, 'error');
+  }
+}
+
+async function loadSettings() {
+  try {
+    const res  = await fetch('/api/settings');
+    const json = await res.json();
+    if (json.company_name) document.querySelector('.logo-text').textContent = json.company_name;
+    if (json.search_term)  currentSearchTerm = json.search_term;
+  } catch(e) {
+    console.warn('[Settings] Failed to load:', e);
+  }
+}
+
+async function saveTCOItem() {
+  const project_id = document.getElementById('tcoItemProjectId').value;
+  const desc = document.getElementById('tcoDescription').value.trim();
+  if (!desc) { showToast('Description is required', 'error'); return; }
+  try {
+    const res = await fetch(`/api/projects/${project_id}/tco_items`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        section:           document.getElementById('tcoSection').value,
+        item_ref:          document.getElementById('tcoItemRef').value.trim(),
+        description:       desc,
+        responsible_party: document.getElementById('tcoResponsible').value.trim(),
+        status:            document.getElementById('tcoStatus').value,
+        notes:             document.getElementById('tcoNotes').value.trim()
+      })
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    closeAddTCOModal();
+    ['tcoItemRef','tcoDescription','tcoResponsible','tcoNotes'].forEach(id =>
+      document.getElementById(id).value = '');
+    showToast('Item added', 'success');
+    if (currentProjectId) showProject(currentProjectId);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function refreshChecklistOnly() {
+  if (!currentProjectId) return;
+  try {
+    const res  = await fetch(`/api/projects/${currentProjectId}/report`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    currentProjectData = data;
+    renderChecklistTab(data.tco_items, currentProjectId);
+  } catch(e) { showToast('Error refreshing checklist: ' + e.message, 'error'); }
+}
+
+async function updateTCOStatus(id, status) {
+  try {
+    await fetch(`/api/tco_items/${id}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({status})
+    });
+    showToast('Status updated', 'success');
+    await refreshChecklistOnly();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteTCOItem(id) {
+  try {
+    await fetch(`/api/tco_items/${id}`, {method:'DELETE'});
+    showToast('Item removed', 'success');
+    await refreshChecklistOnly();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ── THEME TOGGLE ───────────────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const isLight = html.getAttribute('data-theme') === 'light';
+  const next = isLight ? 'dark' : 'light';
+  html.setAttribute('data-theme', next);
+  document.getElementById('themeToggleBtn').textContent = next === 'light' ? '🌙' : '☀️';
+  localStorage.setItem('vorea-theme', next);
+}
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+// Restore theme preference
+(function() {
+  const savedTheme = localStorage.getItem('vorea-theme');
+  if (savedTheme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) btn.textContent = '🌙';
+  }
+})();
+
+function applyClientFilter(val) {
+  clientSearchTerm = (val || '').trim();
+  currentPage = 1;
+  if (currentSource !== 'calendar' && currentSource !== 'projects') {
+    renderTable();
+  }
+}
+
+const saved = localStorage.getItem('alertConfig');
+if (saved) {
+  try {
+    const cfg = JSON.parse(saved);
+    if (document.getElementById('alertEmail')) document.getElementById('alertEmail').value = cfg.email || '';
+  } catch(e) {}
+}
+
+loadSettings().then(() => fetchAll());
+</script>
+</body>
+</html>
