@@ -1139,7 +1139,7 @@
 
         <!-- Tabs -->
         <div class="report-tabs" id="reportTabs">
-          <button class="report-tab active-tab" onclick="showReportTab('tab-permits',this)">BIS Permits</button>
+          <button class="report-tab active-tab" onclick="showReportTab('tab-permits',this)">Permits</button>
           <button class="report-tab" onclick="showReportTab('tab-dot',this)">DOT Permits</button>
           <button class="report-tab" onclick="showReportTab('tab-violations',this)">DOB Violations</button>
           <button class="report-tab" onclick="showReportTab('tab-ecb',this)">ECB Violations</button>
@@ -2461,7 +2461,7 @@ async function showProject(project_id) {
     metaParts.push(`${totalOpen} open violation${totalOpen!==1?'s':''}`);
     document.getElementById('reportMeta').textContent = metaParts.join(' · ');
     renderBINChips(data.bins);
-    renderBISPermitsTab(data.permits);
+    renderBISPermitsTab(data.permits, data.dobnow_permits);
     renderDOTPermitsTab(data.dot_permits);
     renderViolationsTab(data.violations.dob, data.violations.dob_open);
     renderECBTab(data.violations.ecb, data.violations.ecb_open);
@@ -2696,57 +2696,118 @@ function filterBISPermits(filter) {
     p.classList.toggle('active', p.dataset.filter === filter));
 }
 
-function renderBISPermitsTab(permits) {
+function renderBISPermitsTab(permits, dobnow_permits) {
   const el = document.getElementById('tab-permits');
-  if (!permits.all.length) {
-    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No BIS permits found for this project.</div>';
+  const bisAll = (permits && permits.all) || [];
+  const nowAll = (dobnow_permits && dobnow_permits.all) || [];
+
+  if (!bisAll.length && !nowAll.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No permits found for this project.</div>';
     return;
   }
-  const all    = permits.all;
-  const open   = permits.open;
-  const closed = all.filter(p => !open.includes(p));
-  const issuedCnt  = all.filter(p => ['ISSUED','RENEWED'].includes((p.permit_status||'').toUpperCase())).length;
-  const expiredCnt = all.filter(p => (p.permit_status||'').toUpperCase() === 'EXPIRED').length;
-  const sofCnt     = all.filter(p => ['SIGNED OFF','CANCELLED','WITHDRAWN'].includes((p.permit_status||'').toUpperCase())).length;
 
-  let html = `<div class="bin-stats-bar">
-    <div class="bin-stat"><span class="bin-stat-val ${permits.open_count>0?'bin-stat-open':'bin-stat-resolved'}">${permits.open_count}</span><span class="bin-stat-lbl">Active</span></div>
-    <div class="bin-stat"><span class="bin-stat-val bin-stat-open">${expiredCnt}</span><span class="bin-stat-lbl">Expired</span></div>
-    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${sofCnt}</span><span class="bin-stat-lbl">Signed Off / Closed</span></div>
-    <div class="bin-stat"><span class="bin-stat-val">${permits.total}</span><span class="bin-stat-lbl">Total</span></div>
-  </div>
-  <div class="filter-pills" id="bis-filter-pills">
-    <button class="filter-pill active" data-filter="all"       onclick="filterBISPermits('all')">All (${all.length})</button>
-    <button class="filter-pill"        data-filter="issued"    onclick="filterBISPermits('issued')">Issued / Renewed (${issuedCnt})</button>
-    <button class="filter-pill"        data-filter="expired"   onclick="filterBISPermits('expired')">Expired (${expiredCnt})</button>
-    <button class="filter-pill"        data-filter="signedoff" onclick="filterBISPermits('signedoff')">Signed Off / Cancelled (${sofCnt})</button>
-  </div>
-  <div class="bin-section">
-    <table class="bin-table">
-      <thead><tr>
-        <th>Job #</th><th>Subcontractor / Permittee</th><th>Permit Type</th>
-        <th>Work Type</th><th>Status</th><th>Issued</th><th>Expires</th>
-      </tr></thead>
-      <tbody id="bis-permit-rows">`;
+  let html = '';
 
-  all.forEach(p => {
-    const jn    = p.job__ || '';
-    const st    = (p.permit_status || '').toUpperCase();
-    const sc    = bisPermitBadge(st);
-    const ptLbl = PERMIT_TYPE_LABELS[p.permit_type] || p.permit_type || '—';
-    const expDt = (p.expiration_date || '').slice(0,10);
-    const expStyle = expDt && new Date(expDt) < new Date() ? 'color:var(--open);font-weight:600' : '';
-    html += `<tr data-status="${st}">
-      <td class="mono" style="font-size:10px">${jn ? dobLink('job',jn) : '—'}</td>
-      <td style="font-size:11px;max-width:160px;white-space:normal">${p.permittee_s_business_name||'—'}</td>
-      <td><span class="badge badge-pending" style="font-size:9px" title="${ptLbl}">${p.permit_type||'—'}</span></td>
-      <td style="max-width:160px;white-space:normal;font-size:11px">${p.work_type||'—'}</td>
-      <td><span class="badge ${sc}" style="font-size:9px">${st||'—'}</span></td>
-      <td style="font-size:11px">${(p.issuance_date||'').slice(0,10)||'—'}</td>
-      <td style="font-size:11px;${expStyle}">${expDt||'—'}</td>
-    </tr>`;
-  });
-  html += '</tbody></table></div>';
+  // ── BIS Permits section ───────────────────────────────────────────────────
+  if (bisAll.length) {
+    const issuedCnt  = bisAll.filter(p => ['ISSUED','RENEWED'].includes((p.permit_status||'').toUpperCase())).length;
+    const expiredCnt = bisAll.filter(p => (p.permit_status||'').toUpperCase() === 'EXPIRED').length;
+    const sofCnt     = bisAll.filter(p => ['SIGNED OFF','CANCELLED','WITHDRAWN'].includes((p.permit_status||'').toUpperCase())).length;
+
+    html += `<div style="margin-bottom:4px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;padding:0 2px">BIS Permits (Traditional)</div>
+    <div class="bin-stats-bar">
+      <div class="bin-stat"><span class="bin-stat-val ${permits.open_count>0?'bin-stat-open':'bin-stat-resolved'}">${permits.open_count}</span><span class="bin-stat-lbl">Active</span></div>
+      <div class="bin-stat"><span class="bin-stat-val ${expiredCnt>0?'bin-stat-open':''}">${expiredCnt}</span><span class="bin-stat-lbl">Expired</span></div>
+      <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${sofCnt}</span><span class="bin-stat-lbl">Signed Off / Closed</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${permits.total}</span><span class="bin-stat-lbl">Total</span></div>
+    </div>
+    <div class="filter-pills" id="bis-filter-pills">
+      <button class="filter-pill active" data-filter="all"       onclick="filterBISPermits('all')">All (${bisAll.length})</button>
+      <button class="filter-pill"        data-filter="issued"    onclick="filterBISPermits('issued')">Issued / Renewed (${issuedCnt})</button>
+      <button class="filter-pill"        data-filter="expired"   onclick="filterBISPermits('expired')">Expired (${expiredCnt})</button>
+      <button class="filter-pill"        data-filter="signedoff" onclick="filterBISPermits('signedoff')">Signed Off / Cancelled (${sofCnt})</button>
+    </div>
+    <div class="bin-section" style="margin-bottom:1.5rem">
+      <table class="bin-table">
+        <thead><tr>
+          <th>Job #</th><th>Subcontractor / Permittee</th><th>Permit Type</th>
+          <th>Work Type</th><th>Status</th><th>Issued</th><th>Expires</th>
+        </tr></thead>
+        <tbody id="bis-permit-rows">`;
+
+    bisAll.forEach(p => {
+      const jn     = p.job__ || '';
+      const st     = (p.permit_status || '').toUpperCase();
+      const sc     = bisPermitBadge(st);
+      const ptLbl  = PERMIT_TYPE_LABELS[p.permit_type] || p.permit_type || '—';
+      const expDt  = (p.expiration_date || '').slice(0,10);
+      const expStyle = expDt && new Date(expDt) < new Date() ? 'color:var(--open);font-weight:600' : '';
+      html += `<tr data-status="${st}">
+        <td class="mono" style="font-size:10px">${jn ? dobLink('job',jn) : '—'}</td>
+        <td style="font-size:11px;max-width:160px;white-space:normal">${p.permittee_s_business_name||'—'}</td>
+        <td><span class="badge badge-pending" style="font-size:9px" title="${ptLbl}">${p.permit_type||'—'}</span></td>
+        <td style="max-width:160px;white-space:normal;font-size:11px">${p.work_type||'—'}</td>
+        <td><span class="badge ${sc}" style="font-size:9px">${st||'—'}</span></td>
+        <td style="font-size:11px">${(p.issuance_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;${expStyle}">${expDt||'—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // ── DOB NOW Approved Permits section ─────────────────────────────────────
+  if (nowAll.length) {
+    const activeCnt  = nowAll.filter(p => _nowIsActive(p.permit_status||'')).length;
+    const expiredCnt = nowAll.filter(p => _nowIsExpired(p.permit_status||'')).length;
+    const sofCnt     = nowAll.filter(p => _nowIsSignedOff(p.permit_status||'')).length;
+    const cancelCnt  = nowAll.filter(p => _nowIsCancelled(p.permit_status||'')).length;
+    const pendingCnt = nowAll.length - activeCnt - expiredCnt - sofCnt - cancelCnt;
+
+    html += `<div style="margin:${bisAll.length?'8px':0} 0 4px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;padding:0 2px">DOB NOW Approved Permits</div>
+    <div class="bin-stats-bar">
+      <div class="bin-stat"><span class="bin-stat-val ${activeCnt>0?'bin-stat-resolved':''}">${activeCnt}</span><span class="bin-stat-lbl">Active / Issued</span></div>
+      <div class="bin-stat"><span class="bin-stat-val ${expiredCnt>0?'bin-stat-open':''}">${expiredCnt}</span><span class="bin-stat-lbl">Expired</span></div>
+      <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${sofCnt}</span><span class="bin-stat-lbl">Signed Off</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${cancelCnt}</span><span class="bin-stat-lbl">Cancelled</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${nowAll.length}</span><span class="bin-stat-lbl">Total</span></div>
+    </div>
+    <div class="filter-pills" id="now-filter-pills">
+      <button class="filter-pill active" data-filter="all"       onclick="filterNOWPermits('all')">All (${nowAll.length})</button>
+      <button class="filter-pill"        data-filter="active"    onclick="filterNOWPermits('active')">Active (${activeCnt})</button>
+      <button class="filter-pill"        data-filter="expired"   onclick="filterNOWPermits('expired')">Expired (${expiredCnt})</button>
+      <button class="filter-pill"        data-filter="signedoff" onclick="filterNOWPermits('signedoff')">Signed Off (${sofCnt})</button>
+      <button class="filter-pill"        data-filter="cancelled" onclick="filterNOWPermits('cancelled')">Cancelled (${cancelCnt})</button>
+      ${pendingCnt ? `<button class="filter-pill" data-filter="pending" onclick="filterNOWPermits('pending')">Other (${pendingCnt})</button>` : ''}
+    </div>
+    <div class="bin-section">
+      <table class="bin-table">
+        <thead><tr>
+          <th>Filing #</th><th>Work Permit</th><th>Seq</th><th>Status</th>
+          <th>Job Description</th><th>Filing Reason</th><th>Approved</th><th>Issued</th><th>Expires</th>
+        </tr></thead>
+        <tbody id="now-permit-rows">`;
+
+    nowAll.forEach(p => {
+      const st      = (p.permit_status || '').toUpperCase();
+      const badge   = nowPermitBadge(st);
+      const isDim   = _nowIsExpired(st) || _nowIsSignedOff(st) || _nowIsCancelled(st);
+      const expires = (p.expired_date||'').slice(0,10);
+      const expStyle = st === 'EXPIRED' ? 'color:var(--open);font-weight:600' : '';
+      html += `<tr data-status="${st}" ${isDim ? 'style="opacity:.6"' : ''}>
+        <td class="mono" style="font-size:10px">${dobLink('job', p.job_filing_number||'—')}</td>
+        <td class="mono" style="font-size:10px">${p.work_permit||'—'}</td>
+        <td class="mono" style="font-size:10px">${p.sequence_number||'—'}</td>
+        <td><span class="badge ${badge}" style="font-size:9px">${p.permit_status||'—'}</span></td>
+        <td style="font-size:11px;max-width:220px;white-space:normal">${p.job_description||'—'}</td>
+        <td style="font-size:11px;max-width:140px;white-space:normal">${p.filing_reason||'—'}</td>
+        <td style="font-size:11px">${(p.approved_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px">${(p.issued_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;${expStyle}">${expires||'—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
   el.innerHTML = html;
 }
 
