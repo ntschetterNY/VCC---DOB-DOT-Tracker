@@ -272,6 +272,27 @@ def init_db():
             conn.commit()
         except Exception:
             pass
+
+    # ── Seed default projects if DB is empty (e.g. fresh Vercel cold start) ──
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+        if count == 0:
+            c1 = conn.execute(
+                "INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
+                ('1940 Jerome Ave', '1940 Jerome Ave', 'Bronx'))
+            pid1 = c1.lastrowid
+            c2 = conn.execute(
+                "INSERT INTO projects (project_name, address, borough) VALUES (?,?,?)",
+                ('291 Livingston', '291 Livingston St', 'Brooklyn'))
+            pid2 = c2.lastrowid
+            conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2008251','',1))
+            conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid1,'2129813','1940J - New BIN',0))
+            conn.execute("INSERT INTO project_bins (project_id,bin,label,is_primary) VALUES (?,?,?,?)", (pid2,'3000479','291L',1))
+            conn.commit()
+            logger.info("Seeded default projects (fresh DB)")
+    except Exception as e:
+        logger.warning("Seed skipped: %s", e)
+
     conn.close()
 
 init_db()
