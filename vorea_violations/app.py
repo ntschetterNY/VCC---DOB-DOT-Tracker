@@ -473,6 +473,93 @@ def init_db():
         for stmt in _PG_SCHEMA:
             conn._cur.execute(stmt)
         conn.commit()
+
+        # ── Postgres migrations: add columns / recreate tables with new schema ─
+        # These are safe to run on every startup (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS)
+
+        # 1. Add domain column to projects
+        conn._cur.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain TEXT NOT NULL DEFAULT ''")
+        conn._cur.execute("UPDATE projects SET domain='domaincos.com' WHERE domain=''")
+        conn.commit()
+
+        # Helper: check whether a column exists in a PG table
+        def _pg_has_column(table, column):
+            conn._cur.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name=%s AND column_name=%s",
+                (table, column)
+            )
+            return conn._cur.fetchone() is not None
+
+        # 2. violation_cache — needs composite PK (source, domain); drop+recreate if domain missing
+        if not _pg_has_column('violation_cache', 'domain'):
+            conn._cur.execute("DROP TABLE IF EXISTS violation_cache")
+            conn._cur.execute("""
+                CREATE TABLE violation_cache (
+                    source      TEXT NOT NULL,
+                    domain      TEXT NOT NULL DEFAULT '',
+                    data_json   TEXT,
+                    fetched_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    search_term TEXT DEFAULT '',
+                    PRIMARY KEY (source, domain)
+                )
+            """)
+            conn.commit()
+
+        # 3. violation_snapshots — needs domain column + updated UNIQUE constraint
+        if not _pg_has_column('violation_snapshots', 'domain'):
+            conn._cur.execute("DROP TABLE IF EXISTS violation_snapshots")
+            conn._cur.execute("""
+                CREATE TABLE violation_snapshots (
+                    id            SERIAL PRIMARY KEY,
+                    source        TEXT NOT NULL,
+                    domain        TEXT NOT NULL DEFAULT '',
+                    snapshot_date TEXT NOT NULL,
+                    data_json     TEXT NOT NULL,
+                    record_count  INTEGER DEFAULT 0,
+                    search_term   TEXT DEFAULT '',
+                    fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source, snapshot_date, domain)
+                )
+            """)
+            conn.commit()
+
+        # 4. violation_changes — needs domain column
+        if not _pg_has_column('violation_changes', 'domain'):
+            conn._cur.execute("DROP TABLE IF EXISTS violation_changes")
+            conn._cur.execute("""
+                CREATE TABLE violation_changes (
+                    id           SERIAL PRIMARY KEY,
+                    detected_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    domain       TEXT NOT NULL DEFAULT '',
+                    source       TEXT NOT NULL,
+                    record_id    TEXT NOT NULL,
+                    change_type  TEXT NOT NULL,
+                    old_value    TEXT DEFAULT '',
+                    new_value    TEXT DEFAULT '',
+                    address      TEXT DEFAULT '',
+                    description  TEXT DEFAULT ''
+                )
+            """)
+            conn.commit()
+
+        # 5. app_settings — needs composite PK (key, domain); migrate data if domain missing
+        if not _pg_has_column('app_settings', 'domain'):
+            conn._cur.execute("ALTER TABLE app_settings RENAME TO app_settings_old")
+            conn._cur.execute("""
+                CREATE TABLE app_settings (
+                    key    TEXT NOT NULL,
+                    domain TEXT NOT NULL DEFAULT '',
+                    value  TEXT DEFAULT '',
+                    PRIMARY KEY (key, domain)
+                )
+            """)
+            conn._cur.execute("""
+                INSERT INTO app_settings (key, domain, value)
+                SELECT key, 'domaincos.com', value FROM app_settings_old
+                ON CONFLICT (key, domain) DO NOTHING
+            """)
+            conn._cur.execute("DROP TABLE app_settings_old")
+            conn.commit()
     else:
         # ── SQLite ────────────────────────────────────────────────────────────
         try:
