@@ -1677,7 +1677,9 @@ async function fetchAll() {
     // Show cache / live badge next to timestamp
     const lrEl = document.getElementById('lastRefresh');
     if (json.from_cache && json.cached_at) {
-      const ageSec  = Math.round((Date.now() - new Date(json.cached_at + 'Z').getTime()) / 1000);
+      // Strip timezone offset (+00:00 or -05:00) before appending Z so Date() parses correctly
+      const cleanTs = String(json.cached_at).replace(/[+\-]\d{2}:\d{2}$/, '').replace(/Z$/, '') + 'Z';
+      const ageSec  = Math.round((Date.now() - new Date(cleanTs).getTime()) / 1000);
       const ageMin  = Math.floor(ageSec / 60);
       const ageLbl  = ageMin > 0 ? `${ageMin}m ago` : `${ageSec}s ago`;
       lrEl.innerHTML = `<span style="color:var(--resolved)">● cached</span> ${ageLbl}`;
@@ -1704,6 +1706,10 @@ function switchSource(source, el) {
   currentPage = 1;
   currentSortCol = null;
   currentSortDir = 'desc';
+  currentFilter = 'all';
+  document.querySelectorAll('.filter-btn').forEach(b => b.className = 'filter-btn');
+  const allFilterBtn = document.querySelector('.filter-btn');
+  if (allFilterBtn) allFilterBtn.classList.add('active-all');
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
 
@@ -1752,7 +1758,13 @@ function switchSource(source, el) {
     'DOT Street Construction Permits': '🚧 DOT Street Construction Permits'
   };
   document.getElementById('contentTitle').textContent = titles[source] || source;
-  renderTable();
+  try {
+    renderTable();
+  } catch(e) {
+    console.error('[switchSource] renderTable() threw for source "' + source + '":', e);
+    showToast('Display error (' + source + '): ' + e.message, 'error');
+    showEmpty();
+  }
 }
 
 // ── FILTER ─────────────────────────────────────────────────────────────────
@@ -1766,6 +1778,8 @@ function filterByStatus(status, el) {
 
 // ── RENDER TABLE ───────────────────────────────────────────────────────────
 function renderTable() {
+  console.log('[renderTable] source:', currentSource, '| filter:', currentFilter,
+              '| allData keys:', Object.keys(allData).join(', ') || '(empty)');
   if (Object.keys(allData).length === 0) { showEmpty(); return; }
 
   // Gather rows
