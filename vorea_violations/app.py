@@ -355,6 +355,7 @@ _PG_SCHEMA = [
         email         TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         domain        TEXT NOT NULL,
+        is_admin      INTEGER NOT NULL DEFAULT 0,
         created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
     """CREATE TABLE IF NOT EXISTS projects (
@@ -441,10 +442,15 @@ _PG_SCHEMA = [
 
 # Pre-configured company domains
 _DEFAULT_DOMAINS = [
-    ('domaincos.com', 'VOREA', 'VOREA'),
-    ('vorea.com',     'VOREA', 'VOREA'),
+    ('domaincos.com', 'VOREA',     'VOREA'),
+    ('vorea.com',     'VOREA',     'VOREA'),
     ('schimenti.com', 'Schimenti', 'Schimenti'),
+    ('consigli.com',  'Consigli',  'Consigli'),
+    ('gmail.com',     'Admin',     'VOREA'),   # admin super-user domain
 ]
+
+# Emails that get is_admin=1 on startup (idempotent)
+_ADMIN_EMAILS = ['natecards@gmail.com']
 
 
 def _seed_projects(conn):
@@ -582,6 +588,7 @@ def init_db():
                 email         TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 domain        TEXT NOT NULL,
+                is_admin      INTEGER NOT NULL DEFAULT 0,
                 created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS projects (
@@ -703,6 +710,21 @@ def init_db():
             pass
     conn.commit()
 
+    # Migrate users table: add is_admin column if missing
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+    # Ensure designated admin emails have is_admin=1
+    for email in _ADMIN_EMAILS:
+        try:
+            conn.execute("UPDATE users SET is_admin=1 WHERE email=?", (email,))
+        except Exception:
+            pass
+    conn.commit()
+
     try:
         _seed_projects(conn)
     except Exception as e:
@@ -723,6 +745,28 @@ def login_required(f):
             return redirect('/login')
         return f(*args, **kwargs)
     return decorated
+
+
+def admin_required(f):
+    """Decorator: require is_admin flag in session."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Not authenticated'}), 401
+            return redirect('/login')
+        if not session.get('is_admin'):
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Admin access required'}), 403
+            return redirect('/')
+        return f(*args, **kwargs)
+    return decorated
+
+
+def get_domain():
+    """Return the effective domain for data queries.
+    Admins can switch view to any domain via /api/admin/switch-domain."""
+    return session.get('view_domain') or session.get('domain', '')
 
 
 def _get_domain_config(domain, conn):
@@ -754,9 +798,10 @@ def login():
     session['user_id']      = user['id']
     session['email']        = user['email']
     session['domain']       = domain
+    session['is_admin']     = bool(user['is_admin'])
     session['company_name'] = company['company_name'] if company else domain
     session['search_term']  = company['search_term']  if company else domain
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'is_admin': bool(user['is_admin'])})
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -786,9 +831,10 @@ def register():
     if existing:
         conn.close()
         return jsonify({'error': 'An account with this email already exists'}), 409
+    is_admin_flag = 1 if email in _ADMIN_EMAILS else 0
     conn.execute(
-        'INSERT INTO users (email, password_hash, domain) VALUES (?,?,?)',
-        (email, generate_password_hash(password), domain)
+        'INSERT INTO users (email, password_hash, domain, is_admin) VALUES (?,?,?,?)',
+        (email, generate_password_hash(password), domain, is_admin_flag)
     )
     conn.commit()
     user = conn.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
@@ -797,9 +843,10 @@ def register():
     session['user_id']      = user['id']
     session['email']        = user['email']
     session['domain']       = domain
+    session['is_admin']     = bool(is_admin_flag)
     session['company_name'] = company['company_name']
     session['search_term']  = company['search_term']
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'is_admin': bool(is_admin_flag)})
 
 
 @app.route('/logout')
@@ -1342,7 +1389,8 @@ def classify_status(record, dataset_key):
 def index():
     return render_template("index.html", datasets=DATASETS,
                            company_name=session.get('company_name', 'VOREA'),
-                           user_email=session.get('email', ''))
+                           user_email=session.get('email', ''),
+                           is_admin=session.get('is_admin', False))
 
 
 @app.route("/api/violations")
@@ -1375,7 +1423,7 @@ def get_violations():
 @login_required
 def get_all_violations():
     """Serve from DB cache if fresh (<= 24 h); otherwise live-fetch, snapshot, detect changes."""
-    domain        = session['domain']
+    domain        = get_domain()  # respects admin view-domain switch
     search        = session['search_term']
     force_refresh = request.args.get("refresh", "false").lower() == "true"
 
@@ -1941,10 +1989,12 @@ def get_app_settings():
     conn.close()
     settings = {r['key']: r['value'] for r in rows}
     return jsonify({
-        'company_name': settings.get('company_name', session.get('company_name', 'VOREA')),
-        'search_term':  settings.get('search_term',  session.get('search_term', 'VOREA')),
+        'company_name': session.get('company_name', settings.get('company_name', 'VOREA')),
+        'search_term':  session.get('search_term',  settings.get('search_term',  'VOREA')),
         'user_email':   session.get('email', ''),
         'domain':       domain,
+        'is_admin':     session.get('is_admin', False),
+        'view_domain':  session.get('view_domain', domain),
     })
 
 
@@ -1971,6 +2021,107 @@ def save_app_settings():
     logger.info("Settings updated [%s] — company_name=%s, search_term=%s",
                 domain, d.get('company_name'), d.get('search_term'))
     return jsonify({'success': True})
+
+
+# ─── Admin routes ─────────────────────────────────────────────────────────────
+
+@app.route('/admin')
+@admin_required
+def admin_page():
+    return render_template('admin.html',
+                           user_email=session.get('email', ''),
+                           company_name=session.get('company_name', 'Admin'))
+
+
+@app.route('/api/admin/domains', methods=['GET'])
+@admin_required
+def admin_list_domains():
+    conn = get_db()
+    rows = conn.execute('SELECT domain, company_name, search_term FROM company_domains ORDER BY company_name').fetchall()
+    conn.close()
+    return jsonify({'domains': [dict(r) for r in rows]})
+
+
+@app.route('/api/admin/domains', methods=['POST'])
+@admin_required
+def admin_add_domain():
+    d = request.get_json(silent=True) or {}
+    domain      = (d.get('domain') or '').strip().lower()
+    company_name = (d.get('company_name') or '').strip()
+    search_term  = (d.get('search_term') or '').strip()
+    if not domain or not company_name or not search_term:
+        return jsonify({'error': 'domain, company_name, and search_term are required'}), 400
+    conn = get_db()
+    try:
+        conn.execute(
+            'INSERT OR IGNORE INTO company_domains (domain, company_name, search_term) VALUES (?,?,?)',
+            (domain, company_name, search_term)
+        )
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 500
+    conn.close()
+    logger.info("Admin added domain: %s → %s (%s)", domain, company_name, search_term)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/domains/<path:domain>', methods=['DELETE'])
+@admin_required
+def admin_delete_domain(domain):
+    conn = get_db()
+    conn.execute('DELETE FROM company_domains WHERE domain=?', (domain,))
+    conn.commit()
+    conn.close()
+    logger.info("Admin deleted domain: %s", domain)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/domains/<path:domain>', methods=['PUT'])
+@admin_required
+def admin_update_domain(domain):
+    d = request.get_json(silent=True) or {}
+    company_name = (d.get('company_name') or '').strip()
+    search_term  = (d.get('search_term') or '').strip()
+    if not company_name or not search_term:
+        return jsonify({'error': 'company_name and search_term are required'}), 400
+    conn = get_db()
+    conn.execute(
+        'UPDATE company_domains SET company_name=?, search_term=? WHERE domain=?',
+        (company_name, search_term, domain)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@admin_required
+def admin_list_users():
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT id, email, domain, is_admin, created_at FROM users ORDER BY created_at DESC'
+    ).fetchall()
+    conn.close()
+    return jsonify({'users': [dict(r) for r in rows]})
+
+
+@app.route('/api/admin/switch-domain', methods=['POST'])
+@admin_required
+def admin_switch_domain():
+    """Admin: switch the active viewed domain without changing their identity."""
+    d = request.get_json(silent=True) or {}
+    target = (d.get('domain') or '').strip().lower()
+    conn   = get_db()
+    company = _get_domain_config(target, conn)
+    conn.close()
+    if not company:
+        return jsonify({'error': f'Unknown domain: {target}'}), 404
+    session['view_domain']  = target
+    session['search_term']  = company['search_term']
+    session['company_name'] = company['company_name']
+    logger.info("Admin %s switched view to domain: %s", session.get('email'), target)
+    return jsonify({'ok': True, 'company_name': company['company_name'], 'search_term': company['search_term']})
 
 
 # ─── APScheduler startup (disabled on Vercel — no background threads in serverless) ──

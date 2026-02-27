@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel — VOREA Tracker</title>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #222537;
+      --border: #2a2d3e; --text: #e8eaf0; --text-muted: #7a7f96;
+      --accent: #f5c518; --open: #ef4444; --resolved: #22c55e;
+      --pending: #f59e0b; --font-mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, sans-serif; font-size: 13px; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-mark { background: var(--accent); color: #000; font-weight: 900; font-size: 14px; width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+    .logo-text { font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--text); }
+    .logo-sub  { font-size: 10px; color: var(--text-muted); }
+    .header-right { display: flex; gap: 8px; align-items: center; }
+
+    .btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-accent { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+    .btn-accent:hover { background: #e0b015; color: #000; }
+    .btn-danger { border-color: var(--open); color: var(--open); }
+    .btn-danger:hover { background: var(--open); color: #fff; }
+    .btn-sm { padding: 3px 8px; font-size: 11px; }
+    .btn-success { border-color: var(--resolved); color: var(--resolved); }
+    .btn-success:hover { background: var(--resolved); color: #000; }
+
+    main { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+
+    h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .page-desc { color: var(--text-muted); font-size: 12px; margin-bottom: 28px; }
+
+    .section { margin-bottom: 36px; }
+    .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+    /* Card form */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
+    label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 5px; }
+    input[type=text] { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-size: 12px; font-family: inherit; }
+    input[type=text]:focus { outline: none; border-color: var(--accent); }
+    input[type=text]::placeholder { color: var(--text-muted); }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 8px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+    td { padding: 10px 12px; font-size: 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+    .mono { font-family: var(--font-mono); font-size: 11px; }
+
+    .badge-admin { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+    .badge-user  { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); padding: 2px 7px; border-radius: 4px; font-size: 10px; }
+
+    .toast { position: fixed; bottom: 24px; right: 24px; padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; z-index: 9999; opacity: 0; transition: opacity .3s; pointer-events: none; }
+    .toast.show { opacity: 1; }
+    .toast-success { background: #14532d; color: var(--resolved); border: 1px solid var(--resolved); }
+    .toast-error   { background: #450a0a; color: var(--open);     border: 1px solid var(--open); }
+
+    /* Tab nav */
+    .tabs { display: flex; gap: 2px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .tab { padding: 8px 16px; cursor: pointer; font-size: 12px; color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .empty-row td { text-align: center; color: var(--text-muted); padding: 24px; }
+
+    .inline-edit input { width: 100%; background: var(--surface2); border: 1px solid var(--accent); border-radius: 4px; padding: 4px 7px; color: var(--text); font-size: 12px; font-family: inherit; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-mark">V</div>
+    <div>
+      <div class="logo-text">{{ company_name }} / ADMIN PANEL</div>
+      <div class="logo-sub">{{ user_email }}</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <a href="/" class="btn">← Back to App</a>
+    <a href="/logout" class="btn">Sign out</a>
+  </div>
+</header>
+
+<main>
+  <h1>Admin Configuration</h1>
+  <p class="page-desc">Manage company domains, users, and tracked search terms.</p>
+
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('companies', this)">Companies</div>
+    <div class="tab" onclick="showTab('users', this)">Users</div>
+  </div>
+
+  <!-- ── COMPANIES TAB ── -->
+  <div id="tab-companies" class="tab-panel active">
+    <div class="section">
+      <div class="section-title">Add Company</div>
+      <div class="card">
+        <div class="form-grid">
+          <div>
+            <label>Domain</label>
+            <input type="text" id="newDomain" placeholder="e.g. acme.com">
+          </div>
+          <div>
+            <label>Company Name</label>
+            <input type="text" id="newCompanyName" placeholder="e.g. Acme Corp">
+          </div>
+          <div>
+            <label>Search Term (NYC Open Data)</label>
+            <input type="text" id="newSearchTerm" placeholder="e.g. ACME">
+          </div>
+          <div>
+            <button class="btn btn-accent" onclick="addDomain()">Add Company</button>
+          </div>
+        </div>
+        <p style="margin-top:10px;color:var(--text-muted);font-size:11px">
+          The <strong>Search Term</strong> is used to query NYC Open Data (e.g. the respondent name on ECB violations).
+          Users with emails at this domain will automatically be assigned to this company on registration.
+        </p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Registered Companies</div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table id="domainsTable">
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Company Name</th>
+              <th>Search Term</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="domainsBody">
+            <tr class="empty-row"><td colspan="4">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── USERS TAB ── -->
+  <div id="tab-users" class="tab-panel">
+    <div class="section">
+      <div class="section-title">Registered Users</div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table id="usersTable">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Domain</th>
+              <th>Role</th>
+              <th>Registered</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody">
+            <tr class="empty-row"><td colspan="4">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script>
+function showTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'users') loadUsers();
+}
+
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast toast-${type} show`;
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Domains ──────────────────────────────────────────────────────────────────
+async function loadDomains() {
+  const res  = await fetch('/api/admin/domains');
+  const json = await res.json();
+  const tbody = document.getElementById('domainsBody');
+  if (!json.domains || json.domains.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No companies registered</td></tr>';
+    return;
+  }
+  tbody.innerHTML = json.domains.map(d => `
+    <tr id="row-${d.domain}">
+      <td class="mono">${d.domain}</td>
+      <td><span id="name-${d.domain}">${d.company_name}</span></td>
+      <td><span id="st-${d.domain}">${d.search_term}</span></td>
+      <td style="white-space:nowrap;text-align:right">
+        <button class="btn btn-sm btn-success" onclick="editDomain('${d.domain}','${d.company_name}','${d.search_term}')">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteDomain('${d.domain}','${d.company_name}')">Delete</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function addDomain() {
+  const domain      = document.getElementById('newDomain').value.trim().toLowerCase();
+  const companyName = document.getElementById('newCompanyName').value.trim();
+  const searchTerm  = document.getElementById('newSearchTerm').value.trim();
+  if (!domain || !companyName || !searchTerm) { toast('All three fields are required', 'error'); return; }
+  const res  = await fetch('/api/admin/domains', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({domain, company_name: companyName, search_term: searchTerm})
+  });
+  const json = await res.json();
+  if (json.error) { toast(json.error, 'error'); return; }
+  toast(`Added ${companyName} (${domain})`);
+  document.getElementById('newDomain').value = '';
+  document.getElementById('newCompanyName').value = '';
+  document.getElementById('newSearchTerm').value = '';
+  loadDomains();
+}
+
+function editDomain(domain, currentName, currentSt) {
+  const row = document.getElementById('row-' + domain);
+  row.innerHTML = `
+    <td class="mono">${domain}</td>
+    <td><input class="inline-edit" id="edit-name-${domain}" value="${currentName}" style="width:100%"></td>
+    <td><input class="inline-edit" id="edit-st-${domain}"   value="${currentSt}"   style="width:100%"></td>
+    <td style="white-space:nowrap;text-align:right">
+      <button class="btn btn-sm btn-accent" onclick="saveDomain('${domain}')">Save</button>
+      <button class="btn btn-sm" onclick="loadDomains()">Cancel</button>
+    </td>`;
+}
+
+async function saveDomain(domain) {
+  const companyName = document.getElementById('edit-name-' + domain).value.trim();
+  const searchTerm  = document.getElementById('edit-st-'   + domain).value.trim();
+  if (!companyName || !searchTerm) { toast('Both fields are required', 'error'); return; }
+  const res  = await fetch(`/api/admin/domains/${domain}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({company_name: companyName, search_term: searchTerm})
+  });
+  const json = await res.json();
+  if (json.error) { toast(json.error, 'error'); return; }
+  toast(`Updated ${domain}`);
+  loadDomains();
+}
+
+async function deleteDomain(domain, name) {
+  if (!confirm(`Delete company "${name}" (${domain})?\n\nThis will not remove existing users but they won't be able to register new accounts.`)) return;
+  const res  = await fetch(`/api/admin/domains/${domain}`, {method: 'DELETE'});
+  const json = await res.json();
+  if (json.error) { toast(json.error, 'error'); return; }
+  toast(`Deleted ${domain}`, 'success');
+  loadDomains();
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  const res  = await fetch('/api/admin/users');
+  const json = await res.json();
+  const tbody = document.getElementById('usersBody');
+  if (!json.users || json.users.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No users registered</td></tr>';
+    return;
+  }
+  tbody.innerHTML = json.users.map(u => `
+    <tr>
+      <td>${u.email}</td>
+      <td class="mono">${u.domain}</td>
+      <td>${u.is_admin ? '<span class="badge-admin">Admin</span>' : '<span class="badge-user">User</span>'}</td>
+      <td style="color:var(--text-muted)">${(u.created_at || '').slice(0,10)}</td>
+    </tr>`).join('');
+}
+
+loadDomains();
+</script>
+</body>
+</html>

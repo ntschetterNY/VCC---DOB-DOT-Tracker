@@ -1039,9 +1039,23 @@
     <button class="btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle light/dark theme">☀️</button>
     <button class="btn" id="changesBtn" onclick="openChangesPanel()" title="Recent changes">🔔<span id="changesBadge" class="changes-badge" style="display:none"></span></button>
     <button class="btn" id="settingsBtn" onclick="openSettingsModal()" title="Settings">⚙️</button>
+    {% if is_admin %}<a href="/admin" class="btn" title="Admin panel" style="text-decoration:none;background:#7c3aed22;border-color:#7c3aed44;color:#a78bfa">🏢 Admin</a>{% endif %}
     <a href="/logout" class="btn" title="Sign out ({{ user_email }})" style="text-decoration:none">⏻</a>
   </div>
 </header>
+
+{% if is_admin %}
+<!-- ── ADMIN DOMAIN SWITCHER ── -->
+<div id="adminBanner" style="background:#7c3aed11;border-bottom:1px solid #7c3aed33;padding:6px 20px;display:flex;align-items:center;gap:12px;font-size:12px">
+  <span style="color:#a78bfa;font-weight:700">🏢 Admin</span>
+  <span style="color:var(--text-muted)">Viewing:</span>
+  <select id="adminDomainSelect" onchange="adminSwitchDomain(this.value)"
+    style="background:var(--surface2);border:1px solid #7c3aed44;border-radius:5px;color:var(--text);padding:3px 8px;font-size:12px;cursor:pointer">
+    <option value="">Loading companies…</option>
+  </select>
+  <span style="color:var(--text-muted);font-size:11px" id="adminViewLabel"></span>
+</div>
+{% endif %}
 
 <!-- ── MAIN ── -->
 <div class="main">
@@ -3607,8 +3621,49 @@ async function loadSettings() {
     const json = await res.json();
     if (json.company_name) document.querySelector('.logo-text').textContent = json.company_name;
     if (json.search_term)  currentSearchTerm = json.search_term;
+    // Admin: populate domain switcher
+    if (json.is_admin) _adminLoadDomains(json.view_domain || json.domain);
   } catch(e) {
     console.warn('[Settings] Failed to load:', e);
+  }
+}
+
+async function _adminLoadDomains(currentDomain) {
+  const sel = document.getElementById('adminDomainSelect');
+  if (!sel) return;
+  try {
+    const res  = await fetch('/api/admin/domains');
+    const json = await res.json();
+    sel.innerHTML = (json.domains || []).map(d =>
+      `<option value="${d.domain}" ${d.domain === currentDomain ? 'selected' : ''}>${d.company_name} (${d.domain})</option>`
+    ).join('');
+    const chosen = (json.domains || []).find(d => d.domain === currentDomain);
+    if (chosen) _adminSetLabel(chosen);
+  } catch(e) { console.warn('Admin domain load failed:', e); }
+}
+
+function _adminSetLabel(company) {
+  const lbl = document.getElementById('adminViewLabel');
+  if (lbl) lbl.textContent = `search: "${company.search_term}"`;
+}
+
+async function adminSwitchDomain(domain) {
+  if (!domain) return;
+  try {
+    const res  = await fetch('/api/admin/switch-domain', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({domain})
+    });
+    const json = await res.json();
+    if (json.error) { showToast(json.error, 'error'); return; }
+    document.querySelector('.logo-text').textContent = json.company_name;
+    currentSearchTerm = json.search_term;
+    _adminSetLabel(json);
+    allData = {};
+    fetchAll();
+    showToast(`Switched to ${json.company_name}`, 'success');
+  } catch(e) {
+    showToast('Switch failed: ' + e.message, 'error');
   }
 }
 
