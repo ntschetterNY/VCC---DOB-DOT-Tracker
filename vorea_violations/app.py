@@ -1434,11 +1434,24 @@ def get_all_violations():
             all_results[key]          = enriched
         logger.info("=== Live fetch complete — total %d records ===", summary["total"])
 
+    # Convert cached_at to a Unix timestamp (integer seconds) so the frontend
+    # doesn't have to parse browser-specific date strings (avoids Safari NaN).
+    cached_at_ts = None
+    if cached_at is not None:
+        try:
+            if isinstance(cached_at, datetime):
+                dt = cached_at.replace(tzinfo=None) if cached_at.tzinfo else cached_at
+            else:
+                dt = datetime.fromisoformat(str(cached_at).replace(' ', 'T').split('+')[0].rstrip('Z'))
+            cached_at_ts = int((dt - datetime(1970, 1, 1)).total_seconds())
+        except Exception:
+            cached_at_ts = None
+
     return jsonify({
         "results":    all_results,
         "summary":    summary,
         "from_cache": from_cache,
-        "cached_at":  cached_at,
+        "cached_at":  cached_at_ts,
     })
 
 

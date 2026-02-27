@@ -1680,9 +1680,8 @@ async function fetchAll() {
     // Show cache / live badge next to timestamp
     const lrEl = document.getElementById('lastRefresh');
     if (json.from_cache && json.cached_at) {
-      // Strip timezone offset (+00:00 or -05:00) before appending Z so Date() parses correctly
-      const cleanTs = String(json.cached_at).replace(/[+\-]\d{2}:\d{2}$/, '').replace(/Z$/, '') + 'Z';
-      const ageSec  = Math.round((Date.now() - new Date(cleanTs).getTime()) / 1000);
+      // cached_at is now a Unix timestamp (integer seconds) — no date string parsing needed
+      const ageSec  = Math.round(Date.now() / 1000 - json.cached_at);
       const ageMin  = Math.floor(ageSec / 60);
       const ageLbl  = ageMin > 0 ? `${ageMin}m ago` : `${ageSec}s ago`;
       lrEl.innerHTML = `<span style="color:var(--resolved)">● cached</span> ${ageLbl}`;
