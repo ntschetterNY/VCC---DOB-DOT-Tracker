@@ -1575,6 +1575,7 @@
 <script>
 // ── STATE ──────────────────────────────────────────────────────────────────
 let allData = {};           // { "DOB Violations": [...], ... }
+let _fetchInFlight = false; // guard against concurrent fetchAll() calls
 let currentSource = 'all';
 let currentFilter = 'all';
 let currentPage = 1;
@@ -1653,6 +1654,8 @@ const COL_LABELS = {
 
 // ── FETCH ──────────────────────────────────────────────────────────────────
 async function fetchAll() {
+  if (_fetchInFlight) { console.warn('[fetchAll] already in-flight, skipping'); return; }
+  _fetchInFlight = true;
   showLoader();
   try {
     const res = await fetch('/api/all');
@@ -1697,6 +1700,8 @@ async function fetchAll() {
   } catch(e) {
     showToast('Failed to fetch data: ' + e.message, 'error');
     showEmpty();
+  } finally {
+    _fetchInFlight = false;
   }
 }
 
@@ -1779,7 +1784,7 @@ function filterByStatus(status, el) {
 // ── RENDER TABLE ───────────────────────────────────────────────────────────
 function renderTable() {
   console.log('[renderTable] source:', currentSource, '| filter:', currentFilter,
-              '| allData keys:', Object.keys(allData).join(', ') || '(empty)');
+              '| allData counts:', Object.entries(allData).map(([k,v]) => `${k.split(' ')[0]}=${Array.isArray(v)?v.length:typeof v}`).join(', ') || '(empty)');
   if (Object.keys(allData).length === 0) { showEmpty(); return; }
 
   // Gather rows
@@ -3702,7 +3707,8 @@ if (saved) {
 }
 
 loadSettings().then(() => fetchAll());
-setTimeout(loadChangesCount, 2000);
+// Use arrow fn so loadChangesCount is looked up when the timer fires (after second <script> block executes)
+setTimeout(() => loadChangesCount(), 2000);
 </script>
 
 <!-- ── CHANGES PANEL ── -->
