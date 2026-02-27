@@ -162,12 +162,13 @@
             <tr>
               <th>Email</th>
               <th>Domain</th>
-              <th>Role</th>
+              <th>App Admin</th>
               <th>Registered</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="usersBody">
-            <tr class="empty-row"><td colspan="4">Loading…</td></tr>
+            <tr class="empty-row"><td colspan="5">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -273,16 +274,38 @@ async function loadUsers() {
   const json = await res.json();
   const tbody = document.getElementById('usersBody');
   if (!json.users || json.users.length === 0) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No users registered</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No users registered</td></tr>';
     return;
   }
-  tbody.innerHTML = json.users.map(u => `
-    <tr>
+  tbody.innerHTML = json.users.map(u => {
+    const adminBadge = u.is_admin
+      ? '<span class="badge-admin">✓ App Admin</span>'
+      : '<span class="badge-user">—</span>';
+    const toggleBtn = u.is_admin
+      ? `<button class="btn btn-sm btn-danger" onclick="setAdmin(${u.id}, false, '${u.email}')">Revoke Admin</button>`
+      : `<button class="btn btn-sm btn-success" onclick="setAdmin(${u.id}, true, '${u.email}')">Grant Admin</button>`;
+    return `
+    <tr id="user-row-${u.id}">
       <td>${u.email}</td>
       <td class="mono">${u.domain}</td>
-      <td>${u.is_admin ? '<span class="badge-admin">Admin</span>' : '<span class="badge-user">User</span>'}</td>
+      <td>${adminBadge}</td>
       <td style="color:var(--text-muted)">${(u.created_at || '').slice(0,10)}</td>
-    </tr>`).join('');
+      <td style="text-align:right">${toggleBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function setAdmin(userId, grant, email) {
+  const action = grant ? 'grant admin access to' : 'revoke admin access from';
+  if (!confirm(`Are you sure you want to ${action} ${email}?`)) return;
+  const res  = await fetch(`/api/admin/users/${userId}/set-admin`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({is_admin: grant})
+  });
+  const json = await res.json();
+  if (json.error) { toast(json.error, 'error'); return; }
+  toast(`${grant ? 'Granted' : 'Revoked'} admin for ${email}`);
+  loadUsers();
 }
 
 loadDomains();

@@ -446,11 +446,13 @@ _DEFAULT_DOMAINS = [
     ('vorea.com',     'VOREA',     'VOREA'),
     ('schimenti.com', 'Schimenti', 'Schimenti'),
     ('consigli.com',  'Consigli',  'Consigli'),
-    ('gmail.com',     'Admin',     'VOREA'),   # admin super-user domain
 ]
 
-# Emails that get is_admin=1 on startup (idempotent)
+# Specific email addresses granted app-admin access regardless of domain.
+# These bypass domain registration checks and get is_admin=1.
 _ADMIN_EMAILS = ['natecards@gmail.com']
+# Default company config used for admin-email accounts with no matching domain
+_ADMIN_DEFAULT_COMPANY = {'company_name': 'App Admin', 'search_term': 'VOREA'}
 
 
 def _seed_projects(conn):
@@ -823,10 +825,14 @@ def register():
         return jsonify({'error': 'Invalid email address'}), 400
     domain = email.split('@')[1]
     conn   = get_db()
-    company = _get_domain_config(domain, conn)
-    if not company:
-        conn.close()
-        return jsonify({'error': f'The domain @{domain} is not authorized. Contact your administrator.'}), 403
+    # Admin emails bypass the domain check entirely
+    if email in _ADMIN_EMAILS:
+        company = _ADMIN_DEFAULT_COMPANY
+    else:
+        company = _get_domain_config(domain, conn)
+        if not company:
+            conn.close()
+            return jsonify({'error': f'The domain @{domain} is not authorized. Contact your administrator.'}), 403
     existing = conn.execute('SELECT id FROM users WHERE email=?', (email,)).fetchone()
     if existing:
         conn.close()
@@ -2104,6 +2110,29 @@ def admin_list_users():
     ).fetchall()
     conn.close()
     return jsonify({'users': [dict(r) for r in rows]})
+
+
+@app.route('/api/admin/users/<int:user_id>/set-admin', methods=['PUT'])
+@admin_required
+def admin_set_admin(user_id):
+    """Grant or revoke app-admin on any user account."""
+    d        = request.get_json(silent=True) or {}
+    is_admin = bool(d.get('is_admin', False))
+    conn     = get_db()
+    user = conn.execute('SELECT id, email FROM users WHERE id=?', (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        return jsonify({'error': 'User not found'}), 404
+    # Prevent self-demotion
+    if user['id'] == session.get('user_id') and not is_admin:
+        conn.close()
+        return jsonify({'error': 'You cannot remove your own admin access'}), 400
+    conn.execute('UPDATE users SET is_admin=? WHERE id=?', (1 if is_admin else 0, user_id))
+    conn.commit()
+    conn.close()
+    action = 'granted' if is_admin else 'revoked'
+    logger.info("Admin %s %s admin for user %s", session.get('email'), action, user['email'])
+    return jsonify({'ok': True})
 
 
 @app.route('/api/admin/switch-domain', methods=['POST'])
