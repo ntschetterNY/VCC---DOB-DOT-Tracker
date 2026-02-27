@@ -890,27 +890,30 @@ def _detect_and_save_changes(conn, domain, source, old_records, new_records):
 def _refresh_domain(conn, domain, search, today):
     """Fetch all datasets for a single domain, update cache + snapshots + change log."""
     for key in DATASETS:
-        old_row = conn.execute(
-            'SELECT data_json FROM violation_cache WHERE source=? AND domain=?', (key, domain)
-        ).fetchone()
-        old_enriched = json.loads(old_row['data_json']) if old_row and old_row['data_json'] else []
-        result = fetch_violations(key, search_term=search)
-        if result["success"]:
-            enriched = _enrich_records(result["data"], key)
-            logger.info("  ✓ [%s] %s — %d records", domain, key, len(enriched))
-            _detect_and_save_changes(conn, domain, key, old_enriched, enriched)
-            conn.execute(
-                'INSERT OR REPLACE INTO violation_snapshots '
-                '(source, domain, snapshot_date, data_json, record_count, search_term) VALUES (?,?,?,?,?,?)',
-                (key, domain, today, json.dumps(enriched), len(enriched), search)
-            )
-            conn.execute(
-                'INSERT OR REPLACE INTO violation_cache '
-                '(source, domain, data_json, fetched_at, search_term) VALUES (?,?,?,CURRENT_TIMESTAMP,?)',
-                (key, domain, json.dumps(enriched), search)
-            )
-        else:
-            logger.warning("  ✗ [%s] %s — FAILED (cache unchanged): %s", domain, key, result.get("error"))
+        try:
+            old_row = conn.execute(
+                'SELECT data_json FROM violation_cache WHERE source=? AND domain=?', (key, domain)
+            ).fetchone()
+            old_enriched = json.loads(old_row['data_json']) if old_row and old_row['data_json'] else []
+            result = fetch_violations(key, search_term=search)
+            if result["success"]:
+                enriched = _enrich_records(result["data"], key)
+                logger.info("  ✓ [%s] %s — %d records", domain, key, len(enriched))
+                _detect_and_save_changes(conn, domain, key, old_enriched, enriched)
+                conn.execute(
+                    'INSERT OR REPLACE INTO violation_snapshots '
+                    '(source, domain, snapshot_date, data_json, record_count, search_term) VALUES (?,?,?,?,?,?)',
+                    (key, domain, today, json.dumps(enriched), len(enriched), search)
+                )
+                conn.execute(
+                    'INSERT OR REPLACE INTO violation_cache '
+                    '(source, domain, data_json, fetched_at, search_term) VALUES (?,?,?,CURRENT_TIMESTAMP,?)',
+                    (key, domain, json.dumps(enriched), search)
+                )
+            else:
+                logger.warning("  ✗ [%s] %s — FAILED (cache unchanged): %s", domain, key, result.get("error"))
+        except Exception as e:
+            logger.error("  ✗ [%s] %s — exception during refresh: %s", domain, key, e)
 
 
 def refresh_all_cache():
@@ -930,10 +933,14 @@ def refresh_all_cache():
     logger.info("=== Scheduled cache refresh complete ===")
 
 
-def _cache_age_minutes(fetched_at_str):
-    """Return age in minutes from a UTC ISO timestamp string, or 9999 if invalid."""
+def _cache_age_minutes(fetched_at_val):
+    """Return age in minutes from a UTC timestamp (string or datetime), or 9999 if invalid."""
     try:
-        fetched_at = datetime.fromisoformat(fetched_at_str.replace('Z', ''))
+        if isinstance(fetched_at_val, datetime):
+            # psycopg2 returns TIMESTAMP columns as Python datetime objects (may be tz-aware)
+            fetched_at = fetched_at_val.replace(tzinfo=None) if fetched_at_val.tzinfo else fetched_at_val
+        else:
+            fetched_at = datetime.fromisoformat(str(fetched_at_val).replace('Z', '').split('+')[0].strip())
         return (datetime.utcnow() - fetched_at).total_seconds() / 60
     except Exception:
         return 9999
