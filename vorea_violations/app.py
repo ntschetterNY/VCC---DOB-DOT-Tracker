@@ -1575,7 +1575,7 @@ def _project_with_bins(conn, project):
 @app.route('/api/projects', methods=['GET'])
 @login_required
 def get_projects():
-    domain = session['domain']
+    domain = get_domain()
     conn   = get_db()
     projects = conn.execute('SELECT * FROM projects WHERE domain=? ORDER BY project_name', (domain,)).fetchall()
     result = [_project_with_bins(conn, p) for p in projects]
@@ -1588,7 +1588,7 @@ def get_projects():
 def add_project():
     d      = request.json or {}
     name   = d.get('project_name', '').strip()
-    domain = session['domain']
+    domain = get_domain()
     if not name:
         return jsonify({'error': 'Project name required'}), 400
     conn = get_db()
@@ -1617,7 +1617,7 @@ def add_project():
 @login_required
 def update_project(project_id):
     d      = request.json or {}
-    domain = session['domain']
+    domain = get_domain()
     sets, vals = [], []
     for f in ['project_name', 'address', 'borough', 'notes']:
         if f in d:
@@ -1636,7 +1636,7 @@ def update_project(project_id):
 @app.route('/api/projects/<int:project_id>', methods=['DELETE'])
 @login_required
 def delete_project(project_id):
-    domain = session['domain']
+    domain = get_domain()
     conn   = get_db()
     project = conn.execute('SELECT id FROM projects WHERE id=? AND domain=?', (project_id, domain)).fetchone()
     if not project:
@@ -1713,7 +1713,7 @@ def remove_bin(project_id, bin_num):
 @login_required
 def get_project_report(project_id):
     """Aggregate DOB NOW + BIS permits + DOT permits + violations across all project BINs."""
-    domain = session['domain']
+    domain = get_domain()
     conn   = get_db()
     project  = conn.execute('SELECT * FROM projects WHERE id=? AND domain=?', (project_id, domain)).fetchone()
     bins     = conn.execute(
