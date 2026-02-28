@@ -1281,6 +1281,231 @@ BORO_NAMES = {
     "QUEENS": "Queens", "STATEN ISLAND": "Staten Island",
 }
 
+# ─── TR1 / Special & Progress Inspection labels ───────────────────────────────
+# Maps NYC DOB category codes → human-readable descriptions for TR1 filings.
+_TR1_LABELS = {
+    # Special Inspection (SI) categories
+    'SI-AG': 'Aggregate',
+    'SI-AT': 'Anchorage to Concrete',
+    'SI-BM': 'Below-Grade Waterproofing',
+    'SI-BV': 'Bolts Installed in Concrete',
+    'SI-CC': 'Cold-Formed Steel Framing',
+    'SI-CL': 'Concrete',
+    'SI-CM': 'Curtain Wall & Cladding System',
+    'SI-CS': 'Structural Cold-Formed Steel',
+    'SI-DD': 'Driven Deep Foundation Elements',
+    'SI-DG': 'Drilled Piers',
+    'SI-DM': 'Dampproofing',
+    'SI-DP': 'Deep Foundation Elements',
+    'SI-DS': 'Diaphragm / Shear Wall',
+    'SI-DW': 'Drilled Concrete Piers / Caissons',
+    'SI-FA': 'Fabricated Items',
+    'SI-FP': 'Fire-Resistive Penetrations & Joints',
+    'SI-FR': 'Spray-Applied Fire-Resistant Materials',
+    'SI-FS': 'Facade System',
+    'SI-GW': 'Glass & Glazing',
+    'SI-HB': 'High-Strength Bolts / Nuts / Washers',
+    'SI-HD': 'Helical Piles',
+    'SI-IM': 'Impervious Membrane',
+    'SI-MA': 'Masonry',
+    'SI-ME': 'Mechanical / Electrical',
+    'SI-MI': 'Micropiles',
+    'SI-MO': 'Moisture Protection',
+    'SI-MS': 'Masonry (Structural)',
+    'SI-MT': 'Metal',
+    'SI-PB': 'Post-Installed Anchors (Structural)',
+    'SI-PE': 'Pre-Engineered Metal Buildings',
+    'SI-PI': 'Post-Installed Anchors (Non-Structural)',
+    'SI-PL': 'Plumbing',
+    'SI-PM': 'Pre-Manufactured Structural Components',
+    'SI-PR': 'Post-Tensioning',
+    'SI-PS': 'Pre-Stressed Concrete',
+    'SI-PT': 'Post-Tensioned Concrete',
+    'SI-RC': 'Reinforced Concrete',
+    'SI-RF': 'Roofing',
+    'SI-RM': 'Reinforcing Material / Pre-Stressed',
+    'SI-SC': 'Smoke Control',
+    'SI-SF': 'Shotcrete / Gunite',
+    'SI-SL': 'Soil / Rock',
+    'SI-SM': 'Structural Steel',
+    'SI-SO': 'Soils',
+    'SI-SS': 'Structural Steel',
+    'SI-ST': 'Structural Testing & Inspection',
+    'SI-SW': 'Site Work',
+    'SI-TM': 'Timber',
+    'SI-VB': 'Vibration Monitoring',
+    'SI-WA': 'Waterproofing',
+    'SI-WD': 'Wood',
+    'SI-WL': 'Wall / Partition',
+    'SI-WP': 'Waterproofing',
+    'SI-WW': 'Welding',
+    # Progress Inspection (PI) categories
+    'PI-BO': 'Boiler',
+    'PI-CA': 'Caissons / Piles',
+    'PI-CC': 'Curtain Wall / Cladding',
+    'PI-CO': 'Construction / Demolition',
+    'PI-CR': 'Crane / Derrick Operation',
+    'PI-EE': 'Exterior Envelope',
+    'PI-EF': 'Electrical Final',
+    'PI-EL': 'Electrical',
+    'PI-ER': 'Electrical Rough',
+    'PI-EV': 'Elevator',
+    'PI-FA': 'Fire Alarm',
+    'PI-FF': 'Fire Suppression Final',
+    'PI-FG': 'Fuel Gas Piping',
+    'PI-FN': 'Foundation',
+    'PI-FP': 'Fire Protection',
+    'PI-FR': 'Framing',
+    'PI-FS': 'Fire Suppression / Sprinkler',
+    'PI-FW': 'Fuel-Burning / Mechanical Equipment',
+    'PI-GP': 'Gas Piping',
+    'PI-HD': 'HVAC Duct System',
+    'PI-HV': 'HVAC',
+    'PI-IN': 'Insulation',
+    'PI-ME': 'Mechanical Equipment',
+    'PI-MF': 'Mechanical Final',
+    'PI-MR': 'Mechanical Rough',
+    'PI-PF': 'Plumbing Final',
+    'PI-PL': 'Plumbing',
+    'PI-PM': 'Plumbing / Mechanical',
+    'PI-PR': 'Plumbing Rough',
+    'PI-RO': 'Roofing',
+    'PI-SF': 'Structural Frame',
+    'PI-SH': 'Site / Health',
+    'PI-ST': 'Structural',
+    'PI-WP': 'Waterproofing',
+}
+
+
+def fetch_dobnow_special_inspections_by_bin(bin_number):
+    """Query DOB NOW Job Application Filings (w9ak-ipjd) filtered to filings
+    that require Special Inspections (special_inspection_requirement = 'YES')."""
+    url = "https://data.cityofnewyork.us/resource/w9ak-ipjd.json"
+    params = {
+        "bin": bin_number,
+        "$where": "upper(special_inspection_requirement) = 'YES'",
+        "$limit": 100,
+        "$order": "filing_date DESC",
+        "$select": (
+            "job_filing_number,bin,borough,house_no,street_name,job_type,"
+            "filing_status,filing_date,approved_date,signoff_date,"
+            "owner_s_business_name,special_inspection_requirement,"
+            "special_inspection_agency_number,"
+            "general_construction_work_type_,structural_work_type_"
+        ),
+    }
+    try:
+        r = requests.get(url, params=params, timeout=30)
+        r.raise_for_status()
+        return r.json() if isinstance(r.json(), list) else []
+    except Exception:
+        return []
+
+
+def _parse_tr1_api_response(data):
+    """Extract Special/Progress inspection category lists from a DOB NOW API response."""
+    result = {'special_inspections': [], 'progress_inspections': []}
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return result
+
+    sections = [
+        (
+            ['specialInspectionCategories', 'special_inspection_categories',
+             'specialInspections', 'siCategories', 'tr1SpecialCategories',
+             'specialInspectionRequirements', 'SpecialInspectionCategories'],
+            'special_inspections',
+        ),
+        (
+            ['progressInspectionCategories', 'progress_inspection_categories',
+             'progressInspections', 'piCategories', 'tr1ProgressCategories',
+             'progressInspectionRequirements', 'ProgressInspectionCategories'],
+            'progress_inspections',
+        ),
+    ]
+
+    for keys, out_key in sections:
+        for key in keys:
+            val = data.get(key)
+            if not val:
+                continue
+            cats = val if isinstance(val, list) else [val]
+            for cat in cats:
+                if isinstance(cat, dict):
+                    code = (cat.get('code') or cat.get('categoryCode')
+                            or cat.get('Code') or '').strip()
+                    desc = (cat.get('description') or cat.get('categoryDescription')
+                            or cat.get('Description') or _TR1_LABELS.get(code, code))
+                    result[out_key].append({
+                        'code':        code,
+                        'description': desc,
+                        'mandatory':   cat.get('mandatory', cat.get('isMandatory', True)),
+                        'status':      (cat.get('status') or cat.get('inspectionStatus') or ''),
+                    })
+                elif isinstance(cat, str) and cat.strip():
+                    code = cat.strip()
+                    result[out_key].append({
+                        'code':        code,
+                        'description': _TR1_LABELS.get(code, code),
+                        'mandatory':   True,
+                        'status':      '',
+                    })
+            break  # found this section; stop looking
+
+    return result
+
+
+def scrape_dobnow_tr1_categories(job_filing_number):
+    """Attempt to fetch TR1 Special/Progress Inspection categories for a job filing
+    from the DOB NOW public portal REST API.
+
+    DOB NOW portal is an Angular SPA backed by JSON REST endpoints.
+    Tries several known endpoint patterns; returns structured category data on
+    success or an empty structure if the portal is unreachable or returns no data.
+    """
+    empty = {'special_inspections': [], 'progress_inspections': [], 'source': None}
+    if not job_filing_number:
+        return empty
+
+    jfn = str(job_filing_number).strip()
+    headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Referer': 'https://a810-dobnow.nyc.gov/publish/',
+        'X-Requested-With': 'XMLHttpRequest',
+    }
+
+    # Candidate endpoint patterns that back the DOB NOW Angular portal
+    candidates = [
+        (f"https://a810-dobnow.nyc.gov/Publish/Api/JobFilings/Details/{jfn}", {}),
+        (f"https://a810-dobnow.nyc.gov/Publish/Api/TechnicalReports/TR1/{jfn}", {}),
+        (f"https://a810-dobnow.nyc.gov/Publish/Api/SpecialInspections/{jfn}", {}),
+        ("https://a810-dobnow.nyc.gov/Bldgs.WEB.ECF.B1/ECFHelper.asmx/GetJobDetails",
+         {"jobFilingNumber": jfn}),
+    ]
+
+    for url, params in candidates:
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+            if r.status_code != 200:
+                continue
+            ct = r.headers.get('Content-Type', '')
+            if 'json' not in ct and 'javascript' not in ct:
+                continue
+            data = r.json()
+            if not data:
+                continue
+            parsed = _parse_tr1_api_response(data)
+            if parsed['special_inspections'] or parsed['progress_inspections']:
+                parsed['source'] = url
+                return parsed
+        except Exception:
+            continue
+
+    logger.debug("TR1 portal lookup returned no detail for filing %s", jfn)
+    return empty
+
 def bulk_fetch_building_addresses(bin_list):
     """Look up building addresses for a list of BINs via DOB Permit Issuance dataset.
     Returns a dict mapping bin → (house_no, street_name, boro_code)."""
@@ -1808,6 +2033,16 @@ def get_project_report(project_id):
     open_electrical = [e for e in electrical
                        if str(e.get('filing_status', '')).upper() not in ELEC_CLOSED]
 
+    # Special Inspections summary — derived from already-fetched DOB NOW filings
+    si_filings = [
+        d for d in dobnow
+        if str(d.get('special_inspection_requirement', '')).upper() == 'YES'
+    ]
+    si_active = [
+        d for d in si_filings
+        if str(d.get('filing_status', '')).upper() not in NOW_CLOSED
+    ]
+
     return jsonify({
         'project':       dict(project),
         'bins':          [dict(b) for b in bins],
@@ -1832,6 +2067,100 @@ def get_project_report(project_id):
                           'total': len(electrical), 'open_count': len(open_electrical)},
         'elevator':      {'all': elevator_perm,
                           'total': len(elevator_perm)},
+        'special_inspections': {
+            'filings':        si_filings,
+            'active_filings': si_active,
+            'total':          len(si_filings),
+            'active_count':   len(si_active),
+            'note': ('Use /api/projects/{id}/special-inspections for full TR1 category detail.'
+                     if si_filings else None),
+        },
+    })
+
+
+@app.route('/api/projects/<int:project_id>/special-inspections')
+@login_required
+def get_project_special_inspections(project_id):
+    """Return TR1 Special & Progress Inspection data for all job filings in a project.
+
+    Phase 1 (Socrata): identifies every job filing for this project's BINs that
+    has special_inspection_requirement=YES via the w9ak-ipjd dataset.
+
+    Phase 2 (DOB NOW portal): for each flagged filing, attempts to pull the full
+    list of Special Inspection (SI) and Progress Inspection (PI) categories from
+    the DOB NOW portal REST API.  Falls back gracefully if the portal is
+    unavailable — the Socrata flag data is always returned regardless.
+    """
+    domain = session['domain']
+    conn   = get_db()
+    project = conn.execute(
+        'SELECT * FROM projects WHERE id=? AND domain=?', (project_id, domain)
+    ).fetchone()
+    bins = conn.execute(
+        'SELECT bin FROM project_bins WHERE project_id=?', (project_id,)
+    ).fetchall()
+    conn.close()
+
+    if not project:
+        return jsonify({'error': 'Project not found'}), 404
+
+    # Phase 1: collect all SI-flagged filings from Socrata across every BIN
+    si_filings = []
+    for b in bins:
+        si_filings += fetch_dobnow_special_inspections_by_bin(b['bin'])
+
+    # Deduplicate by job_filing_number
+    seen, unique_si = set(), []
+    for f in si_filings:
+        jfn = f.get('job_filing_number', '')
+        if jfn and jfn not in seen:
+            seen.add(jfn)
+            unique_si.append(f)
+
+    # Phase 2: attempt portal lookup for TR1 category detail on each filing
+    NOW_CLOSED = {'APPROVED', 'SIGNED OFF', 'WITHDRAWN', 'COMPLETED', 'DISAPPROVED'}
+    results = []
+    for filing in unique_si:
+        jfn    = filing.get('job_filing_number', '')
+        tr1    = scrape_dobnow_tr1_categories(jfn)
+        addr   = f"{filing.get('house_no', '')} {filing.get('street_name', '')}".strip()
+        status = str(filing.get('filing_status', '')).upper()
+        results.append({
+            'job_filing_number':       jfn,
+            'bin':                     filing.get('bin', ''),
+            'address':                 addr,
+            'job_type':                filing.get('job_type', ''),
+            'filing_status':           filing.get('filing_status', ''),
+            'is_active':               status not in NOW_CLOSED,
+            'filing_date':             (filing.get('filing_date') or '')[:10],
+            'approved_date':           (filing.get('approved_date') or '')[:10],
+            'signoff_date':            (filing.get('signoff_date') or '')[:10],
+            'owner':                   filing.get('owner_s_business_name', ''),
+            'si_agency_number':        filing.get('special_inspection_agency_number', ''),
+            'work_types': {
+                'general_construction': filing.get('general_construction_work_type_', ''),
+                'structural':           filing.get('structural_work_type_', ''),
+            },
+            'special_inspections':     tr1['special_inspections'],
+            'progress_inspections':    tr1['progress_inspections'],
+            'portal_detail_available': bool(
+                tr1['special_inspections'] or tr1['progress_inspections']
+            ),
+            'portal_source':           tr1['source'],
+        })
+
+    has_gaps = any(not r['portal_detail_available'] for r in results)
+    return jsonify({
+        'project':            dict(project),
+        'si_filings':         results,
+        'total':              len(results),
+        'active_count':       sum(1 for r in results if r['is_active']),
+        'with_portal_detail': sum(1 for r in results if r['portal_detail_available']),
+        'tr1_label_map':      _TR1_LABELS,
+        'portal_note': (
+            'Inspection category detail (SI-xx / PI-xx codes) requires the DOB NOW portal. '
+            'View filings without detail at https://a810-dobnow.nyc.gov/publish/'
+        ) if has_gaps else None,
     })
 
 
