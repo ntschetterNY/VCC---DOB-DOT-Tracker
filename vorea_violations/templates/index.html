@@ -3661,6 +3661,8 @@ async function adminSwitchDomain(domain) {
     _adminSetLabel(json);
     allData = {};
     fetchAll();
+    showProjectsList();
+    loadProjects();
     showToast(`Switched to ${json.company_name}`, 'success');
   } catch(e) {
     showToast('Switch failed: ' + e.message, 'error');
