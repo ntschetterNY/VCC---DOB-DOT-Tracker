@@ -3538,40 +3538,94 @@ function renderTCOStatusTab(data) {
     : (plbFilings.length ? 'All plumbing filings signed off or closed — click to expand' : 'No plumbing filings found for this BIN');
   const plbDetailHtml = plbFilings.length ? filingDetailTable(plbFilings, 'plumbing_work_type') : null;
 
-  // 3. Elevator Signoff — 50% of permit filings must reach JOB SIGNED-OFF
+  // 3. Elevator Signoff — 50% of non-hoist permit filings must reach JOB SIGNED-OFF
+  //    Personnel/Material Hoists are excluded from the 50% count but must be closed out.
   const ELEV_SIGNED_OFF = 'JOB SIGNED-OFF';
-  const elevSigned  = elevAll.filter(d => (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF);
-  const elevPct     = elevAll.length > 0 ? elevSigned.length / elevAll.length : null;
+  const HOIST_KW = ['personnel hoist', 'material hoist', 'personnel/material hoist'];
+  function isHoist(d) {
+    return HOIST_KW.some(k => (d.elevatordevicetype||d.device_type||'').toLowerCase().includes(k));
+  }
+  const elevCore    = elevAll.filter(d => !isHoist(d));
+  const elevHoists  = elevAll.filter(d =>  isHoist(d));
+  const elevSigned  = elevCore.filter(d => (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF);
+  const elevPct     = elevCore.length > 0 ? elevSigned.length / elevCore.length : null;
+  const hoistActive = elevHoists.filter(d => !isClosed(d.filing_status));
   const elevColor   = elevAll.length === 0 ? 'green'
-    : elevPct >= 0.5 ? 'green'
-    : elevPct > 0   ? 'yellow'
+    : (elevCore.length === 0 && hoistActive.length === 0) ? 'green'
+    : (elevPct >= 0.5 && hoistActive.length === 0) ? 'green'
+    : (elevPct >= 0.5 || elevCore.length === 0) ? 'yellow'
     : 'red';
+  const hoistPart   = elevHoists.length
+    ? `; ${elevHoists.length} personnel hoist(s) ${hoistActive.length ? '⚠️ still open — must be closed' : '✓ closed'}`
+    : '';
   const elevSummary = elevAll.length === 0
     ? 'No elevator permit filings found for this BIN'
-    : `${elevSigned.length} of ${elevAll.length} filing(s) permanently signed off (${Math.round((elevPct||0)*100)}% — need ≥50%) — click to expand`;
+    : `${elevSigned.length} of ${elevCore.length} elevator filing(s) signed off (${Math.round((elevPct||0)*100)}% — need ≥50%)${hoistPart} — click to expand`;
+
+  // Item 3: Filter electrical to elevator-related filings only
+  const ELEC_ELEV_KW = ['elevator', 'hoist', 'escalator', 'lift', 'conveyance'];
+  function isElevElec(d) {
+    const txt = ((d.category_work_list||'') + ' ' + (d.job_description||'') + ' ' + (d.descriptionofwork||'')).toLowerCase();
+    return ELEC_ELEV_KW.some(k => txt.includes(k));
+  }
+  const elevElectrical   = electrical.filter(isElevElec);
+  const electricalToShow = elevElectrical.length > 0 ? elevElectrical : electrical;
+  const elecFallback     = elevElectrical.length === 0 && electrical.length > 0;
 
   let elevDetailHtml = '';
-  elevDetailHtml += `<table class="bin-table"><thead><tr>
-    <th>Filing #</th><th>Filed</th><th>Device Type</th><th>Work Description</th><th>Status</th>
-  </tr></thead><tbody>`;
-  elevAll.forEach(d => {
-    const signed = (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF;
-    const closed = isClosed(d.filing_status);
-    elevDetailHtml += `<tr style="${closed && !signed ? 'opacity:.65' : ''}">
-      <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
-      <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
-      <td style="font-size:11px">${d.elevatordevicetype||d.device_type||'—'}</td>
-      <td style="font-size:11px;max-width:200px;white-space:normal">${(d.descriptionofwork||'').slice(0,90)||'—'}</td>
-      <td><span class="badge ${signed?'badge-resolved':closed?'badge-resolved':'badge-pending'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
-    </tr>`;
-  });
-  elevDetailHtml += '</tbody></table>';
-  if (electrical.length) {
-    elevDetailHtml += `<div style="padding:6px 12px 3px;font-size:11px;font-weight:600;border-top:1px solid var(--border)">Related Electrical Filings (${electrical.length})</div>`;
+  // — Standard elevator filings (counted toward 50% threshold) —
+  if (elevCore.length) {
+    elevDetailHtml += `<div style="padding:6px 12px 3px;font-size:11px;font-weight:600">Elevator Filings — counted toward 50% threshold (${elevCore.length})</div>`;
+    elevDetailHtml += `<table class="bin-table"><thead><tr>
+      <th>Filing #</th><th>Filed</th><th>Device Type</th><th>Work Description</th><th>Status</th>
+    </tr></thead><tbody>`;
+    elevCore.forEach(d => {
+      const signed = (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF;
+      const closed = isClosed(d.filing_status);
+      elevDetailHtml += `<tr style="${closed && !signed ? 'opacity:.65' : ''}">
+        <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+        <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px">${d.elevatordevicetype||d.device_type||'—'}</td>
+        <td style="font-size:11px;max-width:200px;white-space:normal">${(d.descriptionofwork||'').slice(0,90)||'—'}</td>
+        <td><span class="badge ${signed?'badge-resolved':closed?'badge-resolved':'badge-pending'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
+      </tr>`;
+    });
+    elevDetailHtml += '</tbody></table>';
+  } else {
+    elevDetailHtml += `<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">No standard elevator filings found.</div>`;
+  }
+  // — Personnel / Material Hoists (must be closed; NOT counted toward 50%) —
+  if (elevHoists.length) {
+    const hoistHdrColor = hoistActive.length > 0 ? 'var(--open)' : 'var(--resolved)';
+    elevDetailHtml += `<div style="padding:6px 12px 3px;font-size:11px;font-weight:600;border-top:1px solid var(--border);color:${hoistHdrColor}">Personnel / Material Hoists — must be closed, NOT counted toward 50% (${elevHoists.length})</div>`;
+    elevDetailHtml += `<table class="bin-table"><thead><tr>
+      <th>Filing #</th><th>Filed</th><th>Device Type</th><th>Work Description</th><th>Status</th>
+    </tr></thead><tbody>`;
+    elevHoists.forEach(d => {
+      const closed = isClosed(d.filing_status);
+      elevDetailHtml += `<tr style="${closed ? 'opacity:.65' : ''}">
+        <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+        <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px">${d.elevatordevicetype||d.device_type||'—'}</td>
+        <td style="font-size:11px;max-width:200px;white-space:normal">${(d.descriptionofwork||'').slice(0,90)||'—'}</td>
+        <td><span class="badge ${closed?'badge-resolved':'badge-open'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
+      </tr>`;
+    });
+    elevDetailHtml += '</tbody></table>';
+  }
+  // — Elevator-related electrical filings (filtered by keyword) —
+  if (electricalToShow.length) {
+    const elecHdr = elecFallback
+      ? `All Electrical Filings — no elevator-keyword matches found (${electricalToShow.length})`
+      : `Related Electrical Filings — elevator-related only (${electricalToShow.length})`;
+    elevDetailHtml += `<div style="padding:6px 12px 3px;font-size:11px;font-weight:600;border-top:1px solid var(--border)">${elecHdr}</div>`;
+    if (elecFallback) {
+      elevDetailHtml += `<div style="padding:2px 12px 4px;font-size:10px;color:var(--text-muted)">Showing all electrical filings — none matched elevator / hoist / escalator / lift / conveyance keywords in description.</div>`;
+    }
     elevDetailHtml += `<table class="bin-table"><thead><tr>
       <th>Filing #</th><th>Filed</th><th>Work Description</th><th>Status</th>
     </tr></thead><tbody>`;
-    electrical.forEach(d => {
+    electricalToShow.forEach(d => {
       const done = FILING_CLOSED.some(s => (d.filing_status||'').toUpperCase().includes(s));
       elevDetailHtml += `<tr style="${done?'opacity:.65':''}">
         <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
@@ -3583,16 +3637,27 @@ function renderTCOStatusTab(data) {
     elevDetailHtml += '</tbody></table>';
   }
 
-  // 4. Technical Reports / Special Inspections (no expandable detail — data not available)
+  // 4. Technical Reports / Special Inspections — expandable with lazy TR1 portal detail
   const siActive  = si.active_count || 0;
   const siTotal   = si.total || 0;
   const siColor   = siTotal === 0 ? 'green' : siActive === 0 ? 'green' : 'yellow';
   const siSummary = siTotal === 0
     ? 'No special inspection requirements found in DOB NOW filings'
     : siActive === 0
-      ? `${siTotal} SI filing(s) — all closed or signed off`
-      : `${siActive} active SI filing(s) requiring certification`;
-  const siDetail  = siActive > 0 ? '⚠️ Certification status (Identified/Certified/Waived) not available via NYC Open Data — verify in DOB BIS TR1 form' : null;
+      ? `${siTotal} SI filing(s) — all closed or signed off — click to expand`
+      : `${siActive} of ${siTotal} SI filing(s) active — click to expand and load portal detail`;
+  const siDetail  = siActive > 0
+    ? '⚠️ Certification status (Identified/Certified/Waived) requires DOB NOW portal — load detail below'
+    : null;
+  const siDetailHtml = siTotal > 0
+    ? `<div id="tco-si-detail" style="padding:10px 14px">
+        <button onclick="loadTRDetail(${project.id||0})"
+          style="padding:5px 14px;font-size:11px;background:var(--accent,#3b82f6);color:#fff;border:none;border-radius:4px;cursor:pointer">
+          Load TR1 Detail from DOB NOW Portal
+        </button>
+        <span style="font-size:10px;color:var(--text-muted);margin-left:8px">Fetches live certification status per permit and per agency</span>
+      </div>`
+    : null;
 
   // 5. BIS Administrative Items — manual checklist (section='bis')
   const bisItems    = tcoItems.filter(t => t.section === 'bis');
@@ -3678,7 +3743,7 @@ function renderTCOStatusTab(data) {
   html += sectionCard('🏗️', 'Construction Signoff', gcColor, gcSummary, null, gcDetailHtml, gcDetailHtml ? 'tco-gc-detail' : null);
   html += sectionCard('🔧', 'Plumbing Signoff', plbColor, plbSummary, null, plbDetailHtml, plbDetailHtml ? 'tco-plb-detail' : null);
   html += sectionCard('🛗', 'Elevator Signoff', elevColor, elevSummary, '⚠️ DOB requires ≥50% of elevator devices to be permanently signed off for TCO.', elevDetailHtml, 'tco-elev-detail');
-  html += sectionCard('📋', 'Technical Reports / Special Inspections', siColor, siSummary, siDetail, null, null);
+  html += sectionCard('📋', 'Technical Reports / Special Inspections', siColor, siSummary, siDetail, siDetailHtml, siDetailHtml ? 'tco-si-card' : null);
   html += sectionCard('📁', 'BIS Administrative Items', bisColor, bisSummary, bisDetail, null, null);
   html += sectionCard('🚫', 'Open Violations', violColor, violSummary, null, violDetailHtml||null, violDetailHtml ? 'tco-viol-detail' : null);
   html += `</div>`;
@@ -3707,6 +3772,106 @@ function renderTCOStatusTab(data) {
   }
 
   el.innerHTML = html;
+}
+
+// ── TR1 Detail: lazy-load per-filing and per-agency SI data from DOB NOW portal ──
+function loadTRDetail(projectId) {
+  const container = document.getElementById('tco-si-detail');
+  if (!container) return;
+  container.innerHTML = '<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">Loading TR1 data from DOB NOW portal…</div>';
+  fetch(`/api/projects/${projectId}/special-inspections`)
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(data => renderTRDetail(data, container))
+    .catch(e => {
+      container.innerHTML = `<div style="padding:8px 12px;font-size:11px;color:var(--open)">Failed to load TR1 detail: ${e.message}</div>`;
+    });
+}
+
+function renderTRDetail(data, container) {
+  const filings   = data.si_filings || [];
+  const labelMap  = data.tr1_label_map || {};
+  const total     = data.total || filings.length;
+  const withPortal = data.with_portal_detail || 0;
+
+  if (!filings.length) {
+    container.innerHTML = '<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">No SI filings found for this project.</div>';
+    return;
+  }
+
+  // Helper: render SI/PI category pills
+  function siPills(items) {
+    if (!items || !items.length) return '<span style="color:var(--text-muted);font-size:10px">—</span>';
+    return items.map(si => {
+      const label = labelMap[si.code] || si.description || si.code || '?';
+      const statusColor = si.status === 'CERTIFIED' ? 'var(--resolved)'
+        : si.status === 'WAIVED' ? 'var(--text-muted)'
+        : si.status === 'CERTIFYING' ? '#f59e0b'
+        : si.status === 'IDENTIFIED' ? 'var(--open)'
+        : 'inherit';
+      const statusTip = si.status ? ` title="${si.status}"` : '';
+      return `<span${statusTip} style="display:inline-block;margin:1px 2px;padding:1px 6px;font-size:9px;border-radius:3px;background:var(--surface);border:1px solid var(--border);color:${statusColor};font-weight:600">${si.code||'?'}: ${label}${si.status ? ' · ' + si.status : ''}</span>`;
+    }).join('');
+  }
+
+  let html = `<div style="padding:6px 14px 4px;font-size:11px;color:var(--text-muted)">
+    Portal detail available for ${withPortal} of ${total} filing(s). For Identified / Certified / Waived status, verify in DOB BIS TR1 directly.
+  </div>`;
+
+  // ── A. Per-filing table ──
+  html += `<div style="padding:6px 14px 2px;font-size:11px;font-weight:600">Per-Permit Filing Summary</div>`;
+  html += `<table class="bin-table"><thead><tr>
+    <th>Filing #</th><th>Status</th><th>Agency #</th><th>SI Categories</th><th>Portal?</th>
+  </tr></thead><tbody>`;
+  filings.forEach(f => {
+    const active = f.is_active;
+    const allSI  = [...(f.special_inspections||[]), ...(f.progress_inspections||[])];
+    // Concrete callout
+    const concrete = allSI.find(s => s.code === 'SI-CL' || (s.description||'').toLowerCase().includes('concrete'));
+    const concreteTag = concrete
+      ? `<span title="Concrete status: ${concrete.status||'?'}" style="margin-left:4px;font-size:9px;color:${concrete.status==='CERTIFYING'?'#f59e0b':concrete.status==='CERTIFIED'?'var(--resolved)':'var(--open)'}">🪨 ${concrete.status||'Concrete'}</span>`
+      : '';
+    html += `<tr style="${active ? '' : 'opacity:.65'}">
+      <td class="mono" style="font-size:10px">${dobLink('job', f.job_filing_number||'')}${concreteTag}</td>
+      <td><span class="badge ${active?'badge-pending':'badge-resolved'}" style="font-size:9px">${f.filing_status||'—'}</span></td>
+      <td style="font-size:11px">${f.si_agency_number||'—'}</td>
+      <td style="max-width:300px;white-space:normal">${siPills(allSI)}</td>
+      <td style="font-size:10px;color:${f.portal_detail_available?'var(--resolved)':'var(--text-muted)'}">${f.portal_detail_available?'✓ Yes':'—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+
+  // ── B. Per-agency summary ──
+  const byAgency = {};
+  filings.forEach(f => {
+    const agKey = f.si_agency_number || '(No Agency #)';
+    if (!byAgency[agKey]) byAgency[agKey] = { filings: [], siSet: {} };
+    byAgency[agKey].filings.push(f);
+    [...(f.special_inspections||[]), ...(f.progress_inspections||[])].forEach(s => {
+      byAgency[agKey].siSet[s.code||s.description||'?'] = s;
+    });
+  });
+
+  const agencyKeys = Object.keys(byAgency);
+  if (agencyKeys.length) {
+    html += `<div style="padding:8px 14px 2px;font-size:11px;font-weight:600;border-top:1px solid var(--border)">Per-Agency Summary (${agencyKeys.length} agency number(s))</div>`;
+    html += `<table class="bin-table"><thead><tr>
+      <th>Agency #</th><th>Filing(s)</th><th>Active?</th><th>SI Categories Covered</th>
+    </tr></thead><tbody>`;
+    agencyKeys.forEach(agKey => {
+      const ag = byAgency[agKey];
+      const activeCount = ag.filings.filter(f => f.is_active).length;
+      const allCodes = Object.values(ag.siSet);
+      html += `<tr>
+        <td class="mono" style="font-size:11px;font-weight:600">${agKey}</td>
+        <td style="font-size:11px">${ag.filings.map(f => f.job_filing_number).join('<br>')}</td>
+        <td style="font-size:11px">${activeCount > 0 ? `<span style="color:var(--open)">${activeCount} active</span>` : '<span style="color:var(--resolved)">All closed</span>'}</td>
+        <td style="max-width:300px;white-space:normal">${siPills(allCodes)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+  }
+
+  container.innerHTML = html;
 }
 
 // ── RENDER: TCO Checklist Tab ────────────────────────────────────────────────

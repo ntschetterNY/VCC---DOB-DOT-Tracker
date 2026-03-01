@@ -155,6 +155,7 @@ _PG_UPSERT = {
     'email_config':        'ON CONFLICT (id) DO UPDATE SET recipient=EXCLUDED.recipient, frequency=EXCLUDED.frequency, threshold=EXCLUDED.threshold, sources=EXCLUDED.sources, smtp_user=EXCLUDED.smtp_user, smtp_pass=EXCLUDED.smtp_pass',
     'app_settings':        'ON CONFLICT (key, domain) DO UPDATE SET value=EXCLUDED.value',
     'company_domains':     'ON CONFLICT (domain) DO NOTHING',
+    'si_tr1_cache':        'ON CONFLICT (job_filing_number, domain) DO UPDATE SET data_json=EXCLUDED.data_json, fetched_at=EXCLUDED.fetched_at',
 }
 
 def _pg_table(sql):
@@ -636,6 +637,13 @@ def init_db():
                 smtp_user  TEXT DEFAULT '',
                 smtp_pass  TEXT DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS si_tr1_cache (
+                job_filing_number TEXT NOT NULL,
+                domain            TEXT NOT NULL DEFAULT '',
+                data_json         TEXT,
+                fetched_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (job_filing_number, domain)
+            );
         ''')
         conn.commit()
 
@@ -997,6 +1005,35 @@ def _cache_age_minutes(fetched_at_val):
         return (datetime.utcnow() - fetched_at).total_seconds() / 60
     except Exception:
         return 9999
+
+
+def _get_cached_tr1(conn, jfn, domain, max_age_hours=24):
+    """Return cached TR1 data if present and younger than max_age_hours, else None."""
+    try:
+        row = conn.execute(
+            'SELECT data_json, fetched_at FROM si_tr1_cache WHERE job_filing_number=? AND domain=?',
+            (jfn, domain)
+        ).fetchone()
+        if not row:
+            return None
+        if _cache_age_minutes(row['fetched_at']) > max_age_hours * 60:
+            return None
+        return json.loads(row['data_json'])
+    except Exception:
+        return None
+
+
+def _save_tr1_cache(conn, jfn, domain, data):
+    """Upsert TR1 scrape result into si_tr1_cache."""
+    try:
+        conn.execute(
+            'INSERT OR REPLACE INTO si_tr1_cache (job_filing_number, domain, data_json, fetched_at)'
+            ' VALUES (?,?,?,CURRENT_TIMESTAMP)',
+            (jfn, domain, json.dumps(data))
+        )
+    except Exception as e:
+        logger.warning("Failed to save TR1 cache for %s: %s", jfn, e)
+
 
 # ─── Digest Email ─────────────────────────────────────────────────────────────
 def send_digest():
@@ -1870,7 +1907,7 @@ def _project_with_bins(conn, project):
 @app.route('/api/projects', methods=['GET'])
 @login_required
 def get_projects():
-    domain = session['domain']
+    domain = session.get('view_domain') or session['domain']
     conn   = get_db()
     projects = conn.execute('SELECT * FROM projects WHERE domain=? ORDER BY project_name', (domain,)).fetchall()
     result = [_project_with_bins(conn, p) for p in projects]
@@ -1883,7 +1920,7 @@ def get_projects():
 def add_project():
     d      = request.json or {}
     name   = d.get('project_name', '').strip()
-    domain = session['domain']
+    domain = session.get('view_domain') or session['domain']
     if not name:
         return jsonify({'error': 'Project name required'}), 400
     conn = get_db()
@@ -1912,7 +1949,7 @@ def add_project():
 @login_required
 def update_project(project_id):
     d      = request.json or {}
-    domain = session['domain']
+    domain = session.get('view_domain') or session['domain']
     sets, vals = [], []
     for f in ['project_name', 'address', 'borough', 'notes']:
         if f in d:
@@ -1931,7 +1968,7 @@ def update_project(project_id):
 @app.route('/api/projects/<int:project_id>', methods=['DELETE'])
 @login_required
 def delete_project(project_id):
-    domain = session['domain']
+    domain = session.get('view_domain') or session['domain']
     conn   = get_db()
     project = conn.execute('SELECT id FROM projects WHERE id=? AND domain=?', (project_id, domain)).fetchone()
     if not project:
@@ -2008,7 +2045,7 @@ def remove_bin(project_id, bin_num):
 @login_required
 def get_project_report(project_id):
     """Aggregate DOB NOW + BIS permits + DOT permits + violations across all project BINs."""
-    domain = session['domain']
+    domain = session.get('view_domain') or session['domain']
     conn   = get_db()
     project  = conn.execute('SELECT * FROM projects WHERE id=? AND domain=?', (project_id, domain)).fetchone()
     bins     = conn.execute(
@@ -2170,7 +2207,7 @@ def get_project_special_inspections(project_id):
     the DOB NOW portal REST API.  Falls back gracefully if the portal is
     unavailable — the Socrata flag data is always returned regardless.
     """
-    domain = session['domain']
+    domain = session.get('view_domain') or session['domain']
     conn   = get_db()
     project = conn.execute(
         'SELECT * FROM projects WHERE id=? AND domain=?', (project_id, domain)
@@ -2178,9 +2215,9 @@ def get_project_special_inspections(project_id):
     bins = conn.execute(
         'SELECT bin FROM project_bins WHERE project_id=?', (project_id,)
     ).fetchall()
-    conn.close()
 
     if not project:
+        conn.close()
         return jsonify({'error': 'Project not found'}), 404
 
     # Phase 1: collect all SI-flagged filings from Socrata across every BIN
@@ -2197,11 +2234,16 @@ def get_project_special_inspections(project_id):
             unique_si.append(f)
 
     # Phase 2: attempt portal lookup for TR1 category detail on each filing
+    # Check si_tr1_cache first (24-hour TTL) before hitting the portal
     NOW_CLOSED = {'APPROVED', 'SIGNED OFF', 'WITHDRAWN', 'COMPLETED', 'DISAPPROVED'}
     results = []
+    cache_dirty = False
     for filing in unique_si:
         jfn    = filing.get('job_filing_number', '')
-        tr1    = scrape_dobnow_tr1_categories(jfn)
+        tr1    = _get_cached_tr1(conn, jfn, domain) or scrape_dobnow_tr1_categories(jfn)
+        if tr1.get('special_inspections') or tr1.get('progress_inspections'):
+            _save_tr1_cache(conn, jfn, domain, tr1)
+            cache_dirty = True
         addr   = f"{filing.get('house_no', '')} {filing.get('street_name', '')}".strip()
         status = str(filing.get('filing_status', '')).upper()
         results.append({
@@ -2227,7 +2269,13 @@ def get_project_special_inspections(project_id):
             ),
             'portal_source':           tr1['source'],
         })
+    if cache_dirty:
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
+    conn.close()
     has_gaps = any(not r['portal_detail_available'] for r in results)
     return jsonify({
         'project':            dict(project),
@@ -2561,12 +2609,42 @@ def admin_switch_domain():
     return jsonify({'ok': True, 'company_name': company['company_name'], 'search_term': company['search_term']})
 
 
+def refresh_si_cache_all():
+    """Refresh TR1 portal data for all active SI filings across all projects/domains."""
+    logger.info("=== Starting SI TR1 cache refresh (all projects) ===")
+    conn = get_db()
+    try:
+        projects = conn.execute('SELECT id, domain FROM projects').fetchall()
+        refreshed = 0
+        for proj in projects:
+            bins = conn.execute(
+                'SELECT bin FROM project_bins WHERE project_id=?', (proj['id'],)
+            ).fetchall()
+            for b in bins:
+                filings = fetch_dobnow_special_inspections_by_bin(b['bin'])
+                for f in filings:
+                    jfn = f.get('job_filing_number', '')
+                    if not jfn:
+                        continue
+                    tr1 = scrape_dobnow_tr1_categories(jfn)
+                    _save_tr1_cache(conn, jfn, proj['domain'], tr1)
+                    refreshed += 1
+        conn.commit()
+        logger.info("SI TR1 cache refresh complete — %d filing(s) updated", refreshed)
+    except Exception as e:
+        logger.warning("SI cache refresh failed: %s", e)
+    finally:
+        conn.close()
+
+
 # ─── APScheduler startup (disabled on Vercel — no background threads in serverless) ──
 if HAS_SCHEDULER and not os.environ.get('VERCEL'):
     _sched = BackgroundScheduler(daemon=True)
     _sched.add_job(refresh_all_cache, 'interval', hours=24, id='cache_refresh',
                    max_instances=1, coalesce=True)
     _sched.add_job(check_and_send_digest, 'interval', hours=1, id='digest_check',
+                   max_instances=1, coalesce=True)
+    _sched.add_job(refresh_si_cache_all, 'interval', hours=24, id='si_cache_refresh',
                    max_instances=1, coalesce=True)
     _sched.start()
     import atexit
