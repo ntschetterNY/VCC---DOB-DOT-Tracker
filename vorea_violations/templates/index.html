@@ -487,6 +487,63 @@
     }
     .tco-status-select:focus { border-color: var(--accent); }
 
+    /* ── Signoff Path timeline ── */
+    .signoff-card {
+      border: 1px solid var(--border); border-radius: 6px;
+      margin-bottom: 1.25rem; overflow: hidden;
+    }
+    .signoff-card-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding: 10px 14px; background: var(--surface2);
+      font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim);
+      border-bottom: 1px solid var(--border); gap: 8px; flex-wrap: wrap;
+    }
+    .signoff-timeline { padding: 1rem 1.25rem; }
+    .signoff-step {
+      display: flex; align-items: flex-start; gap: 12px;
+      position: relative; padding-bottom: 1.1rem;
+    }
+    .signoff-step:last-child { padding-bottom: 0; }
+    .signoff-step:not(:last-child)::before {
+      content: ''; position: absolute; left: 12px; top: 28px; bottom: 0;
+      width: 2px; background: var(--border);
+    }
+    .signoff-step.done::before   { background: var(--resolved); }
+    .signoff-step.active::before { background: var(--accent); }
+    .step-dot {
+      width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; position: relative; z-index: 1;
+      border: 2px solid var(--border); background: var(--surface2); color: var(--text-muted);
+    }
+    .signoff-step.done .step-dot   { background: var(--resolved); border-color: var(--resolved); color: #fff; }
+    .signoff-step.active .step-dot {
+      background: var(--accent); border-color: var(--accent); color: #000;
+      box-shadow: 0 0 0 3px rgba(245,197,24,.18);
+    }
+    .step-body { flex: 1; padding-top: 3px; }
+    .step-label {
+      font-size: 12.5px; color: var(--text); font-weight: 500;
+      line-height: 1.3;
+    }
+    .signoff-step.done   .step-label { color: var(--text-muted); }
+    .signoff-step.active .step-label { color: var(--text); }
+    .step-meta {
+      font-family: var(--font-mono); font-size: 9px; text-transform: uppercase;
+      letter-spacing: 0.08em; margin-top: 2px; color: var(--text-muted);
+    }
+    .step-meta.cat-si    { color: #f97316; }
+    .step-meta.cat-pi    { color: #3b82f6; }
+    .step-meta.cat-tr    { color: #a78bfa; }
+    .step-meta.cat-final { color: var(--resolved); }
+    .step-meta.cat-safety   { color: #f59e0b; }
+    .step-meta.cat-utility  { color: #06b6d4; }
+    .signoff-track-label {
+      font-family: var(--font-mono); font-size: 9px; text-transform: uppercase;
+      letter-spacing: .1em; font-weight: 700; margin-bottom: .65rem; padding: 2px 0;
+    }
+
     /* Closed / dismissed badge */
     .badge-closed {
       background: var(--surface2); color: var(--text-muted);
@@ -1250,6 +1307,7 @@
           <button class="report-tab" onclick="showReportTab('tab-electrical',this)">Electrical</button>
           <button class="report-tab" onclick="showReportTab('tab-elevator',this)">Elevator</button>
           <button class="report-tab" onclick="showReportTab('tab-checklist',this)">TCO Checklist</button>
+          <button class="report-tab" onclick="showReportTab('tab-signoff',this)">Signoff Path</button>
         </div>
         <div id="tab-permits"        class="report-tab-content"></div>
         <div id="tab-dot"            class="report-tab-content" style="display:none"></div>
@@ -1259,6 +1317,7 @@
         <div id="tab-electrical"     class="report-tab-content" style="display:none"></div>
         <div id="tab-elevator"       class="report-tab-content" style="display:none"></div>
         <div id="tab-checklist"      class="report-tab-content" style="display:none"></div>
+        <div id="tab-signoff"        class="report-tab-content" style="display:none"></div>
       </div>
 
     </div><!-- /projectsView -->
@@ -2511,6 +2570,198 @@ const TCO_SECTION_LABELS = {
   'other':       '📌 Other Items'
 };
 
+// ── Signoff Path Workflow Definitions ────────────────────────────────────────
+// Steps per work-type track. si:true = only shown when special_inspection_requirement=YES.
+// optional:true = shown grayed with "(if applicable)" label.
+const SIGNOFF_WORKFLOWS = {
+  construction: {
+    label: 'Construction & Structural',
+    color: '#f97316',
+    steps: [
+      { id: 'foundation',    label: 'Foundation Progress Inspection',         cat: 'pi', meta: 'PI-FN · Progress Inspection' },
+      { id: 'concrete_si',   label: 'Concrete Mix Design Certification',      cat: 'si', meta: 'SI-CL · Special Inspection', si: true },
+      { id: 'struct_steel',  label: 'Structural Steel & Welding SI Sign-off', cat: 'si', meta: 'SI-SS / SI-WW · Special Inspection', si: true },
+      { id: 'masonry_si',    label: 'Masonry Special Inspection',             cat: 'si', meta: 'SI-MA · Special Inspection', si: true },
+      { id: 'struct_frame',  label: 'Structural Frame Progress Inspection',   cat: 'pi', meta: 'PI-SF · Progress Inspection' },
+      { id: 'fire_stop',     label: 'Fire-Resistive Penetrations & Joints SI',cat: 'si', meta: 'SI-FP · Special Inspection', si: true },
+      { id: 'ext_envelope',  label: 'Exterior Envelope Progress Inspection',  cat: 'pi', meta: 'PI-EE · Progress Inspection' },
+      { id: 'tr1_signoff',   label: 'TR1 — Special Inspection Agency Sign-off', cat: 'tr', meta: 'Technical Report', si: true },
+      { id: 'tr8_signoff',   label: 'TR8 — Energy Code Compliance',           cat: 'tr', meta: 'Technical Report' },
+      { id: 'site_safety',   label: 'Site Safety Manager Release',            cat: 'safety', meta: 'Site Safety LL33' },
+      { id: 'oer',           label: 'OER Notice of Substantial Completion',   cat: 'safety', meta: 'OER / Regulatory', optional: true },
+      { id: 'dob_final',     label: 'DOB Final Inspection',                   cat: 'final', meta: 'Final Inspection' },
+      { id: 'letter',        label: 'Letter of Completion / Job Sign-off',    cat: 'final', meta: 'DOB Signoff' },
+    ],
+  },
+  plumbing: {
+    label: 'Plumbing',
+    color: '#22c55e',
+    steps: [
+      { id: 'plumb_rough',   label: 'Plumbing Rough-In Inspection',           cat: 'pi', meta: 'PI-PR · Progress Inspection' },
+      { id: 'gas_test',      label: 'Gas / Fuel Gas Piping Test',             cat: 'pi', meta: 'PI-FG · Progress Inspection' },
+      { id: 'drain_test',    label: 'Drain & Waste Pressure Test',            cat: 'pi', meta: 'Field Inspection' },
+      { id: 'plumb_final',   label: 'Plumbing Final Inspection',              cat: 'final', meta: 'PI-PF · Final Inspection' },
+      { id: 'plumb_so',      label: 'Plumbing Sign-off',                      cat: 'final', meta: 'DOB Signoff' },
+    ],
+  },
+  mechanical: {
+    label: 'Mechanical Systems',
+    color: '#3b82f6',
+    steps: [
+      { id: 'mech_rough',    label: 'Mechanical Rough Inspection',            cat: 'pi', meta: 'PI-MR · Progress Inspection' },
+      { id: 'hvac_duct',     label: 'HVAC Duct System Inspection',            cat: 'pi', meta: 'PI-HD · Progress Inspection' },
+      { id: 'test_balance',  label: 'Air / Test & Balance Report',            cat: 'pi', meta: 'Field Inspection' },
+      { id: 'mech_final',    label: 'Mechanical Final Inspection',            cat: 'final', meta: 'PI-MF · Final Inspection' },
+      { id: 'mech_so',       label: 'Mechanical Sign-off',                    cat: 'final', meta: 'DOB Signoff' },
+    ],
+  },
+  electrical: {
+    label: 'Electrical',
+    color: '#a78bfa',
+    steps: [
+      { id: 'elec_rough',    label: 'Electrical Rough-In Inspection',         cat: 'pi', meta: 'PI-ER · Progress Inspection' },
+      { id: 'elec_final',    label: 'Electrical Final Inspection',            cat: 'final', meta: 'PI-EF · Final Inspection' },
+      { id: 'coned',         label: 'Con Edison Service Approval',            cat: 'utility', meta: 'Utility Sign-off' },
+      { id: 'elec_so',       label: 'Electrical Sign-off',                    cat: 'final', meta: 'DOB Signoff' },
+    ],
+  },
+  elevator: {
+    label: 'Elevator',
+    color: '#06b6d4',
+    steps: [
+      { id: 'elev_test',     label: 'Category 1 Acceptance Test Witnessed',   cat: 'pi', meta: 'Field Inspection' },
+      { id: 'elev_final',    label: 'DOB Elevator Final Inspection',          cat: 'final', meta: 'Final Inspection' },
+      { id: 'elev_letter',   label: 'Letter of Operation Issued',             cat: 'final', meta: 'DOB Signoff' },
+    ],
+  },
+};
+
+// Determine which workflow tracks apply to a given DOB NOW filing
+function _filingTracks(f) {
+  const flag = v => v && v.trim().toUpperCase() !== 'N/A';
+  const tracks = [];
+  if (flag(f.general_construction_work_type_) || flag(f.structural_work_type_)) tracks.push('construction');
+  if (flag(f.plumbing_work_type))              tracks.push('plumbing');
+  if (flag(f.mechanical_systems_work_type_))   tracks.push('mechanical');
+  // Electrical / elevator filings come through separate datasets so are rarely in w9ak-ipjd;
+  // include if job_type signals it
+  const jt = (f.job_type || '').toUpperCase();
+  if (jt.includes('EL') || jt.includes('ELECTRICAL'))   tracks.push('electrical');
+  if (jt.includes('EV') || jt.includes('ELEVATOR'))     tracks.push('elevator');
+  return tracks.length ? tracks : ['construction'];
+}
+
+// Compute per-step state: 'done' | 'active' | 'pending'
+function _stepState(idx, total, isClosed, isApproved) {
+  if (isClosed)   return 'done';
+  if (isApproved) {
+    const thresh = Math.floor(total * 0.45);
+    if (idx < thresh)  return 'done';
+    if (idx === thresh) return 'active';
+    return 'pending';
+  }
+  return idx === 0 ? 'active' : 'pending';
+}
+
+// ── RENDER: Signoff Path Tab ─────────────────────────────────────────────────
+function renderSignoffTab(data) {
+  const el = document.getElementById('tab-signoff');
+  const NOW_CLOSED = new Set(['APPROVED','SIGNED OFF','WITHDRAWN','COMPLETED','DISAPPROVED']);
+  const allNow = (data.dobnow && data.dobnow.all) ? data.dobnow.all : [];
+
+  if (!allNow.length) {
+    el.innerHTML = `<div style="padding:2.5rem;text-align:center;color:var(--text-muted)">
+      <div style="font-size:2rem;margin-bottom:.75rem">📋</div>
+      <div style="font-size:13px;font-family:var(--font-mono)">No DOB NOW filings found for this project.</div>
+      <div style="font-size:11px;margin-top:.5rem">Add BINs above to see signoff workflows.</div>
+    </div>`;
+    return;
+  }
+
+  // Show active filings first, then closed
+  const active = allNow.filter(f => !NOW_CLOSED.has((f.filing_status||'').toUpperCase()));
+  const closed = allNow.filter(f =>  NOW_CLOSED.has((f.filing_status||'').toUpperCase()));
+  const ordered = [...active, ...closed];
+
+  let html = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:1rem">
+    <div style="font-size:12px;color:var(--text-muted)">
+      ${active.length} active · ${closed.length} closed/signed-off
+    </div>
+    <a href="https://a810-dobnow.nyc.gov/publish/" target="_blank" rel="noopener"
+       style="font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;color:var(--accent2);text-decoration:none">
+      ↗ DOB NOW PORTAL
+    </a>
+  </div>`;
+
+  ordered.forEach(filing => {
+    const jfn        = filing.job_filing_number || '—';
+    const addr       = `${filing.house_no||''} ${filing.street_name||''}`.trim();
+    const status     = (filing.filing_status || '').toUpperCase();
+    const isClosed   = NOW_CLOSED.has(status);
+    const isApproved = !!(filing.approved_date);
+    const hasSI      = (filing.special_inspection_requirement||'').toUpperCase() === 'YES';
+    const siAgency   = filing.special_inspection_agency_number || '';
+    const signoffDate= filing.signoff_date ? filing.signoff_date.slice(0,10) : null;
+    const tracks     = _filingTracks(filing);
+
+    const badgeCls = isClosed ? 'badge-resolved' : isApproved ? 'badge-pending' : 'badge-open';
+    const dispStatus = filing.filing_status || '—';
+
+    html += `<div class="signoff-card">
+      <div class="signoff-card-header">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <span>Filing ${jfn}</span>
+          <span style="font-family:var(--font-sans);font-size:10px;font-weight:400;color:var(--text-muted);text-transform:none;letter-spacing:0">
+            ${addr}${filing.job_type ? ' · ' + filing.job_type : ''}
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${hasSI ? `<span class="badge" style="font-size:9px;background:rgba(249,115,22,.15);color:#f97316;border-color:rgba(249,115,22,.5)">TR1 SI Required</span>` : ''}
+          ${siAgency ? `<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted)">SIA #${siAgency}</span>` : ''}
+          <span class="badge ${badgeCls}" style="font-size:9px">${dispStatus}</span>
+          ${signoffDate ? `<span style="font-size:9px;color:var(--resolved);font-family:var(--font-mono)">✓ ${signoffDate}</span>` : ''}
+        </div>
+      </div>
+      <div class="signoff-timeline">`;
+
+    tracks.forEach((track, tIdx) => {
+      const wf = SIGNOFF_WORKFLOWS[track];
+      if (!wf) return;
+      // Filter SI-only steps when not required
+      const steps = wf.steps.filter(s => !s.si || hasSI);
+
+      if (tracks.length > 1) {
+        html += `<div class="signoff-track-label" style="color:${wf.color};${tIdx > 0 ? 'margin-top:1.1rem' : ''}">
+          ${wf.label}
+        </div>`;
+      }
+
+      steps.forEach((step, idx) => {
+        const state    = _stepState(idx, steps.length, isClosed, isApproved);
+        const catClass = {si:'cat-si', pi:'cat-pi', tr:'cat-tr', final:'cat-final',
+                          safety:'cat-safety', utility:'cat-utility'}[step.cat] || '';
+        const dotContent = state === 'done' ? '✓' : state === 'active' ? '▶' : (idx + 1);
+
+        html += `<div class="signoff-step ${state}">
+          <div class="step-dot">${dotContent}</div>
+          <div class="step-body">
+            <div class="step-label">${step.label}${step.optional
+              ? ' <span style="font-size:10px;color:var(--text-muted);font-weight:400">(if applicable)</span>' : ''}</div>
+            <div class="step-meta ${catClass}">${step.meta}</div>
+            ${state === 'active'
+              ? `<div style="font-size:10px;color:var(--accent);font-family:var(--font-mono);margin-top:3px">▶ CURRENT STEP</div>`
+              : ''}
+          </div>
+        </div>`;
+      });
+    });
+
+    html += `</div></div>`; // close .signoff-timeline + .signoff-card
+  });
+
+  el.innerHTML = html;
+}
+
 // ── Load Project List ────────────────────────────────────────────────────────
 async function loadProjects() {
   try {
@@ -2562,7 +2813,7 @@ async function showProject(project_id) {
   document.getElementById('reportTitle').textContent    = 'Loading…';
   document.getElementById('reportMeta').textContent     = 'Fetching data…';
   document.getElementById('reportBINs').innerHTML       = '';
-  ['tab-permits','tab-dot','tab-violations','tab-ecb','tab-complaints','tab-electrical','tab-elevator','tab-checklist'].forEach(id =>
+  ['tab-permits','tab-dot','tab-violations','tab-ecb','tab-complaints','tab-electrical','tab-elevator','tab-checklist','tab-signoff'].forEach(id =>
     document.getElementById(id).innerHTML =
       '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading…</div>');
   document.querySelectorAll('.report-tab').forEach((t,i) => t.classList.toggle('active-tab', i===0));
@@ -2590,6 +2841,7 @@ async function showProject(project_id) {
     renderElectricalTab(data.electrical);
     renderElevatorTab(data.elevator);
     renderChecklistTab(data.tco_items, project_id);
+    renderSignoffTab(data);
     showToast('Report loaded', 'success');
   } catch(e) { showToast('Failed to load report: ' + e.message, 'error'); }
 }
