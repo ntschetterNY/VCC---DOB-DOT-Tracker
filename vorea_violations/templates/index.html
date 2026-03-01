@@ -1249,6 +1249,7 @@
           <button class="report-tab" onclick="showReportTab('tab-complaints',this)">311 Complaints</button>
           <button class="report-tab" onclick="showReportTab('tab-electrical',this)">Electrical</button>
           <button class="report-tab" onclick="showReportTab('tab-elevator',this)">Elevator</button>
+          <button class="report-tab" onclick="showReportTab('tab-special-insp',this)">Special Inspections</button>
           <button class="report-tab" onclick="showReportTab('tab-checklist',this)">TCO Checklist</button>
         </div>
         <div id="tab-permits"        class="report-tab-content"></div>
@@ -1258,6 +1259,7 @@
         <div id="tab-complaints"     class="report-tab-content" style="display:none"></div>
         <div id="tab-electrical"     class="report-tab-content" style="display:none"></div>
         <div id="tab-elevator"       class="report-tab-content" style="display:none"></div>
+        <div id="tab-special-insp"  class="report-tab-content" style="display:none"></div>
         <div id="tab-checklist"      class="report-tab-content" style="display:none"></div>
       </div>
 
@@ -2562,7 +2564,7 @@ async function showProject(project_id) {
   document.getElementById('reportTitle').textContent    = 'Loading…';
   document.getElementById('reportMeta').textContent     = 'Fetching data…';
   document.getElementById('reportBINs').innerHTML       = '';
-  ['tab-permits','tab-dot','tab-violations','tab-ecb','tab-complaints','tab-electrical','tab-elevator','tab-checklist'].forEach(id =>
+  ['tab-permits','tab-dot','tab-violations','tab-ecb','tab-complaints','tab-electrical','tab-elevator','tab-special-insp','tab-checklist'].forEach(id =>
     document.getElementById(id).innerHTML =
       '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading…</div>');
   document.querySelectorAll('.report-tab').forEach((t,i) => t.classList.toggle('active-tab', i===0));
@@ -2589,6 +2591,7 @@ async function showProject(project_id) {
     renderComplaintsTab(data.complaints);
     renderElectricalTab(data.electrical);
     renderElevatorTab(data.elevator);
+    renderSpecialInspectionsTab(data.special_inspections);
     renderChecklistTab(data.tco_items, project_id);
     showToast('Report loaded', 'success');
   } catch(e) { showToast('Failed to load report: ' + e.message, 'error'); }
@@ -2657,7 +2660,7 @@ function renderDOBNOWTab(dobnow) {
       </tr></thead><tbody>`;
     active.forEach(d => {
       const wt = [d.general_construction_work_type_, d.mechanical_systems_work_type_, d.plumbing_work_type, d.structural_work_type_].filter(Boolean).join('; ');
-      const siReq = d.special_inspection_requirement || '—';
+      const siReq = d.specialinspectionrequirement || '—';
       const siAgency = d.special_inspection_agency_number || '—';
       const siStyle = siReq !== '—' ? 'color:var(--accent);font-weight:600' : 'color:var(--text-muted)';
       html += `<tr>
@@ -3364,6 +3367,47 @@ function renderElevatorTab(data) {
       <td><span class="badge ${sc}" style="font-size:9px">${(e.filing_status||'—').slice(0,25)}</span></td>
       <td style="font-family:var(--font-mono);font-size:11px">${cost>0?'$'+cost.toLocaleString('en-US',{minimumFractionDigits:0}):'—'}</td>
       <td style="font-family:var(--font-mono);font-size:11px;${due>0?'color:var(--open)':''}">${due>0?'$'+due.toFixed(2):'✓'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ── RENDER: Special Inspections Tab ─────────────────────────────────────────
+function renderSpecialInspectionsTab(data) {
+  const el  = document.getElementById('tab-special-insp');
+  const all = (data && data.filings) || [];
+  if (!all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No special inspection requirements found for this project\'s DOB NOW filings.</div>';
+    return;
+  }
+  const allCats   = all.flatMap(d => (d.specialinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean));
+  const uniqueCats = new Set(allCats);
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-open">${all.length}</span><span class="bin-stat-lbl">Filings w/ SI</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${uniqueCats.size}</span><span class="bin-stat-lbl">Unique Categories</span></div>
+  </div>
+  <div style="padding:6px 12px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:11px;color:var(--text-muted)">
+    ⚠️ Source: DOB NOW filings only. Legacy BIS jobs (X-prefix) are not included. Identified/Certified/Waived/Withdrawn status not available via NYC Open Data.
+  </div>
+  <table class="bin-table">
+    <thead><tr>
+      <th>Filing #</th><th>Filed</th><th>Job Type</th><th>Status</th>
+      <th>Special Inspection Categories</th><th>Progress Inspections</th><th>SI Agency #</th>
+    </tr></thead><tbody>`;
+  all.forEach(d => {
+    const cats = (d.specialinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean);
+    const prog = (d.progressinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean);
+    const pill = s => `<span style="display:inline-block;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin:2px;font-size:10px">${s}</span>`;
+    const isClosed = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN'].some(s => (d.filing_status||'').toUpperCase().includes(s));
+    html += `<tr style="${isClosed?'opacity:.65':''}">
+      <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+      <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px">${d.job_type||'—'}</td>
+      <td><span class="badge ${isClosed?'badge-resolved':'badge-pending'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
+      <td style="max-width:220px;white-space:normal">${cats.map(pill).join('')}</td>
+      <td style="max-width:220px;white-space:normal">${prog.length ? prog.map(pill).join('') : '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td class="mono" style="font-size:10px">${d.special_inspection_agency_number||'—'}</td>
     </tr>`;
   });
   html += '</tbody></table>';

@@ -1143,7 +1143,8 @@ def fetch_dobnow_by_bin(bin_number):
                     "filing_status,filing_date,approved_date,signoff_date,"
                     "owner_s_business_name,general_construction_work_type_,"
                     "mechanical_systems_work_type_,plumbing_work_type,structural_work_type_,"
-                    "special_inspection_requirement,special_inspection_agency_number")
+                    "specialinspectionrequirement,progressinspectionrequirement,"
+                    "special_inspection_agency_number")
     }
     try:
         r = requests.get(url, params=params, timeout=30)
@@ -1379,18 +1380,18 @@ _TR1_LABELS = {
 
 def fetch_dobnow_special_inspections_by_bin(bin_number):
     """Query DOB NOW Job Application Filings (w9ak-ipjd) filtered to filings
-    that require Special Inspections (special_inspection_requirement = 'YES')."""
+    that require Special Inspections. Field is specialinspectionrequirement (no underscores)."""
     url = "https://data.cityofnewyork.us/resource/w9ak-ipjd.json"
     params = {
         "bin": bin_number,
-        "$where": "upper(special_inspection_requirement) = 'YES'",
+        "$where": "specialinspectionrequirement IS NOT NULL",
         "$limit": 100,
         "$order": "filing_date DESC",
         "$select": (
             "job_filing_number,bin,borough,house_no,street_name,job_type,"
             "filing_status,filing_date,approved_date,signoff_date,"
-            "owner_s_business_name,special_inspection_requirement,"
-            "special_inspection_agency_number,"
+            "owner_s_business_name,specialinspectionrequirement,"
+            "progressinspectionrequirement,special_inspection_agency_number,"
             "general_construction_work_type_,structural_work_type_"
         ),
     }
@@ -2034,9 +2035,10 @@ def get_project_report(project_id):
                        if str(e.get('filing_status', '')).upper() not in ELEC_CLOSED]
 
     # Special Inspections summary — derived from already-fetched DOB NOW filings
+    # (field is specialinspectionrequirement — no underscores — comma-separated category names)
     si_filings = [
         d for d in dobnow
-        if str(d.get('special_inspection_requirement', '')).upper() == 'YES'
+        if d.get('specialinspectionrequirement')
     ]
     si_active = [
         d for d in si_filings
