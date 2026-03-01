@@ -3219,6 +3219,7 @@ function renderECBTab(all, open) {
   <table class="bin-table">
     <thead><tr>
       ${sortTh('ecb_violation_number','ECB # / Link')}
+      <th>Address</th>
       ${sortTh('issue_date','Issue Date')}
       ${sortTh('hearing_date','Hearing Date')}
       ${sortTh('violation_type','Type')}
@@ -3239,8 +3240,11 @@ function renderECBTab(all, open) {
     const balance = parseFloat(e.balance_due || 0);
     const rowOp   = (etype === 'resolved' || etype === 'dismissed') ? 'opacity:.65;' : '';
     const desc    = (e.violation_description || '').slice(0, 80) || '—';
+    const _boroMap = {'1':'Manhattan','2':'Bronx','3':'Brooklyn','4':'Queens','5':'Staten Island'};
+    const addr    = e._address || _boroMap[String(e.boro||'')] || '—';
     html += `<tr data-etype="${etype}" style="${rowOp}">
       <td class="mono" style="font-size:10px">${ecbNum !== '—' ? dobLink('ecb', ecbNum) : '—'}</td>
+      <td style="font-size:11px;max-width:160px;white-space:normal">${addr}</td>
       <td style="font-size:11px">${(e.issue_date||'').slice(0,10)}</td>
       <td style="font-size:11px;font-family:var(--font-mono)">${(e.hearing_date||'').slice(0,10)||'—'}</td>
       <td style="font-size:11px;max-width:120px;white-space:normal">${e.violation_type||'—'}</td>

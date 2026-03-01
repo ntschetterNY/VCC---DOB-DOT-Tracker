@@ -891,8 +891,11 @@ def _enrich_records(records, key):
         rec["_status_val"]   = rec.get(ds_config["status_field"], "N/A")
         rec["_source"]       = key
 
-        # For DOB ECB Violations use building address from BIN lookup; fall back to respondent addr
-        if key == "DOB ECB Violations" and bin_addr_map:
+        # For DOB ECB Violations use building address from BIN lookup.
+        # Never fall back to respondent_house_number/respondent_street — that is VOREA's
+        # company address, not the violation building.  If BIN lookup has no result,
+        # show the borough + BIN number so it is still useful and not misleading.
+        if key == "DOB ECB Violations":
             b = str(rec.get("bin", "")).strip()
             if b and b in bin_addr_map:
                 house, street, boro_code = bin_addr_map[b]
@@ -900,7 +903,11 @@ def _enrich_records(records, key):
                 parts = [p for p in [f"{house} {street}".strip(), boro_name] if p]
                 rec["_address"] = ", ".join(parts)
             else:
-                rec["_address"] = compute_address(rec, ds_config)
+                boro_name = BORO_NAMES.get(str(rec.get("boro", "")), "")
+                if b and b != "0":
+                    rec["_address"] = f"{boro_name} (BIN {b})" if boro_name else f"BIN {b}"
+                else:
+                    rec["_address"] = boro_name or "—"
         else:
             rec["_address"] = compute_address(rec, ds_config)
 
@@ -2105,6 +2112,20 @@ def get_project_report(project_id):
     safety_viols   = dedup(safety_viols,   'violation_number')
     ecb            = dedup(ecb,            'ecb_violation_number')
     dot_permits    = dedup(dot_permits,    'permitnumber')
+
+    # Enrich ECB records with building address (BIN lookup) — never show respondent address
+    if ecb:
+        ecb_bin_addr = bulk_fetch_building_addresses([r.get("bin", "") for r in ecb])
+        for r in ecb:
+            b = str(r.get("bin", "")).strip()
+            if b and b in ecb_bin_addr:
+                house, street, boro_code = ecb_bin_addr[b]
+                boro_name = BORO_NAMES.get(boro_code, BORO_NAMES.get(str(r.get("boro", "")), ""))
+                parts = [p for p in [f"{house} {street}".strip(), boro_name] if p]
+                r["_address"] = ", ".join(parts)
+            else:
+                boro_name = BORO_NAMES.get(str(r.get("boro", "")), "")
+                r["_address"] = f"{boro_name} (BIN {b})" if (b and b != "0") else boro_name or "—"
     complaints     = dedup(complaints,     'complaint_number')
     electrical     = dedup(electrical,     'job_filing_number')
     elevator_perm  = dedup(elevator_perm,  'job_filing_number')
