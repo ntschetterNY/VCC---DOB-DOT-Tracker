@@ -998,6 +998,25 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
     }
+
+    /* ── TCO Report Print Styles ── */
+    #tco-print-header { display: none; }
+    @media print {
+      body.tco-printing * { visibility: hidden !important; }
+      body.tco-printing #tab-tco-status,
+      body.tco-printing #tab-tco-status * { visibility: visible !important; }
+      body.tco-printing #tab-tco-status {
+        position: fixed !important; top: 0 !important; left: 0 !important;
+        width: 100% !important; background: #fff !important; color: #000 !important;
+        overflow: visible !important;
+      }
+      body.tco-printing #tco-print-header { display: block !important; }
+      body.tco-printing .bin-stats-bar { break-inside: avoid; }
+      body.tco-printing table { break-inside: avoid; font-size: 8pt !important; }
+      body.tco-printing .badge { border: 1px solid #999 !important; color: #000 !important; background: #eee !important; }
+      body.tco-printing button { display: none !important; }
+      @page { margin: 0.75in; }
+    }
   </style>
 </head>
 <body>
@@ -2641,6 +2660,25 @@ function toggleSection(id) {
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
+function printTCOReport() {
+  // Expand all TCO detail sections before printing so they appear in the PDF
+  document.querySelectorAll('#tab-tco-status [id^="tco-"]').forEach(el => {
+    el.dataset._wasHidden = el.style.display === 'none' ? '1' : '0';
+    el.style.display = 'block';
+  });
+  const hdr = document.getElementById('tco-print-header');
+  if (hdr) { hdr.dataset._wasHidden = hdr.style.display === 'none' ? '1' : '0'; hdr.style.display = 'block'; }
+  document.body.classList.add('tco-printing');
+  window.print();
+  document.body.classList.remove('tco-printing');
+  // Restore state after print dialog closes
+  document.querySelectorAll('#tab-tco-status [id^="tco-"]').forEach(el => {
+    if (el.dataset._wasHidden === '1') el.style.display = 'none';
+    delete el.dataset._wasHidden;
+  });
+  if (hdr && hdr.dataset._wasHidden === '1') hdr.style.display = 'none';
+}
+
 // ── RENDER: DOB NOW Tab ──────────────────────────────────────────────────────
 function renderDOBNOWTab(dobnow) {
   const el = document.getElementById('tab-dobnow');
@@ -3421,41 +3459,74 @@ function renderSpecialInspectionsTab(data) {
 function renderTCOStatusTab(data) {
   const el = document.getElementById('tab-tco-status');
   const dobnowAll  = (data.dobnow && data.dobnow.all) || [];
-  const elevator   = data.elevator || {};
+  const elevAll    = (data.elevator && data.elevator.all) || [];
+  const electrical = (data.electrical && data.electrical.all) || [];
   const si         = data.special_inspections || {};
   const tcoItems   = data.tco_items || [];
   const violations = data.violations || {};
   const coHistory  = (data.co_history && data.co_history.all) || [];
+  const project    = data.project || {};
 
-  const CLOSED_STATUSES = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN','APPROVED','SIGNED OFF','COMPLETED','DISAPPROVED'];
-  function isClosed(status) { return CLOSED_STATUSES.some(s => (status||'').toUpperCase().includes(s)); }
+  const FILING_CLOSED = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN','APPROVED','SIGNED OFF','COMPLETED','DISAPPROVED'];
+  function isClosed(status) { return FILING_CLOSED.some(s => (status||'').toUpperCase().includes(s)); }
 
-  function sectionCard(icon, label, color, summary, detail) {
+  // Expandable section card — detailHtml/cardId are optional
+  function sectionCard(icon, label, color, summary, detail, detailHtml, cardId) {
     const colorMap = {green:'#22c55e', yellow:'#eab308', red:'#ef4444'};
     const labelMap = {green:'OK', yellow:'PENDING', red:'BLOCKING'};
-    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px">
-      <span style="font-size:20px;line-height:1.2">${icon}</span>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
-          <span style="font-weight:600;font-size:13px">${label}</span>
-          <span style="font-size:10px;font-weight:700;color:${colorMap[color]};text-transform:uppercase;letter-spacing:.5px">${labelMap[color]}</span>
+    const hasDetail = !!(detailHtml && cardId);
+    const hdr = hasDetail
+      ? `onclick="toggleSection('${cardId}')" style="cursor:pointer;padding:12px 16px;display:flex;align-items:flex-start;gap:12px"`
+      : `style="padding:12px 16px;display:flex;align-items:flex-start;gap:12px"`;
+    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">
+      <div ${hdr}>
+        <span style="font-size:20px;line-height:1.2">${icon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+            <span style="font-weight:600;font-size:13px">${label}</span>
+            <span style="font-size:10px;font-weight:700;color:${colorMap[color]};text-transform:uppercase;letter-spacing:.5px">${labelMap[color]}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted)">${summary}</div>
+          ${detail ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${detail}</div>` : ''}
         </div>
-        <div style="font-size:11px;color:var(--text-muted)">${summary}</div>
-        ${detail ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${detail}</div>` : ''}
+        ${hasDetail ? `<span style="color:var(--text-muted);font-size:13px;margin-top:1px;user-select:none">▾</span>` : ''}
       </div>
+      ${hasDetail ? `<div id="${cardId}" style="display:none;border-top:1px solid var(--border)">${detailHtml}</div>` : ''}
     </div>`;
   }
 
-  // 1. Construction Signoff — DOB NOW filings with general construction work type
+  // Shared helper: filing table for construction/plumbing rows
+  function filingDetailTable(rows, workTypeField) {
+    if (!rows.length) return '<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">No filings found.</div>';
+    let t = `<table class="bin-table"><thead><tr>
+      <th>Filing #</th><th>Filed</th><th>Work Type</th><th>Status</th><th>Approved</th><th>Signed Off</th>
+    </tr></thead><tbody>`;
+    rows.forEach(d => {
+      const closed    = isClosed(d.filing_status);
+      const signedOff = !!(d.signoff_date);
+      t += `<tr style="${closed && !signedOff ? 'opacity:.65' : ''}">
+        <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+        <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;max-width:160px;white-space:normal">${d[workTypeField]||'—'}</td>
+        <td><span class="badge ${closed?'badge-resolved':'badge-pending'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
+        <td style="font-size:11px">${(d.approved_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;font-weight:${signedOff?600:400};color:${signedOff?'var(--resolved)':'inherit'}">${(d.signoff_date||'').slice(0,10)||'—'}</td>
+      </tr>`;
+    });
+    return t + '</tbody></table>';
+  }
+
+  // 1. Construction Signoff
   const gcFilings  = dobnowAll.filter(d => d.general_construction_work_type_);
   const gcActive   = gcFilings.filter(d => !isClosed(d.filing_status));
   const gcUnsigned = gcActive.filter(d => !d.signoff_date);
   const gcColor    = gcActive.length === 0 ? 'green' : gcUnsigned.length === 0 ? 'green' : 'red';
   const gcSummary  = gcActive.length
-    ? `${gcUnsigned.length} of ${gcActive.length} active general construction filing(s) not signed off`
-    : (gcFilings.length ? 'All general construction filings are signed off or closed' : 'No general construction filings found for this BIN');
+    ? `${gcUnsigned.length} of ${gcActive.length} active filing(s) not signed off — click to expand`
+    : (gcFilings.length ? 'All general construction filings signed off or closed — click to expand' : 'No general construction filings found for this BIN');
+  const gcDetailHtml = gcFilings.length ? filingDetailTable(gcFilings, 'general_construction_work_type_') : null;
 
-  // 2. Plumbing Signoff — DOB NOW filings with plumbing work type
+  // 2. Plumbing Signoff
   const plbFilings  = dobnowAll.filter(d => d.plumbing_work_type);
   const plbActive   = plbFilings.filter(d => !isClosed(d.filing_status));
   const plbUnsigned = plbActive.filter(d => !d.signoff_date);
@@ -3463,23 +3534,56 @@ function renderTCOStatusTab(data) {
     : plbUnsigned.length === 0 ? 'green'
     : plbUnsigned.length < plbActive.length ? 'yellow' : 'red';
   const plbSummary  = plbActive.length
-    ? `${plbUnsigned.length} of ${plbActive.length} active plumbing filing(s) not signed off`
-    : (plbFilings.length ? 'All plumbing filings are signed off or closed' : 'No plumbing filings found for this BIN');
+    ? `${plbUnsigned.length} of ${plbActive.length} active filing(s) not signed off — click to expand`
+    : (plbFilings.length ? 'All plumbing filings signed off or closed — click to expand' : 'No plumbing filings found for this BIN');
+  const plbDetailHtml = plbFilings.length ? filingDetailTable(plbFilings, 'plumbing_work_type') : null;
 
-  // 3. Elevator Signoff — elevator permit records
-  const elevTotal = elevator.total || 0;
-  const elevOpen  = (elevator.all || []).filter(d => {
-    const s = (d.latest_action_description || d.device_status || '').toLowerCase();
-    return s.includes('fail') || s.includes('violation') || s.includes('unsafe');
+  // 3. Elevator Signoff — 50% of permit filings must reach JOB SIGNED-OFF
+  const ELEV_SIGNED_OFF = 'JOB SIGNED-OFF';
+  const elevSigned  = elevAll.filter(d => (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF);
+  const elevPct     = elevAll.length > 0 ? elevSigned.length / elevAll.length : null;
+  const elevColor   = elevAll.length === 0 ? 'green'
+    : elevPct >= 0.5 ? 'green'
+    : elevPct > 0   ? 'yellow'
+    : 'red';
+  const elevSummary = elevAll.length === 0
+    ? 'No elevator permit filings found for this BIN'
+    : `${elevSigned.length} of ${elevAll.length} filing(s) permanently signed off (${Math.round((elevPct||0)*100)}% — need ≥50%) — click to expand`;
+
+  let elevDetailHtml = '';
+  elevDetailHtml += `<table class="bin-table"><thead><tr>
+    <th>Filing #</th><th>Filed</th><th>Device Type</th><th>Work Description</th><th>Status</th>
+  </tr></thead><tbody>`;
+  elevAll.forEach(d => {
+    const signed = (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF;
+    const closed = isClosed(d.filing_status);
+    elevDetailHtml += `<tr style="${closed && !signed ? 'opacity:.65' : ''}">
+      <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+      <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px">${d.elevatordevicetype||d.device_type||'—'}</td>
+      <td style="font-size:11px;max-width:200px;white-space:normal">${(d.descriptionofwork||'').slice(0,90)||'—'}</td>
+      <td><span class="badge ${signed?'badge-resolved':closed?'badge-resolved':'badge-pending'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
+    </tr>`;
   });
-  const elevColor   = elevTotal === 0 ? 'green' : elevOpen.length === 0 ? 'green' : 'red';
-  const elevSummary = elevTotal === 0
-    ? 'No elevator records found for this BIN'
-    : elevOpen.length === 0
-      ? `${elevTotal} elevator device(s) — no open violations found`
-      : `${elevOpen.length} elevator device(s) with open issues`;
+  elevDetailHtml += '</tbody></table>';
+  if (electrical.length) {
+    elevDetailHtml += `<div style="padding:6px 12px 3px;font-size:11px;font-weight:600;border-top:1px solid var(--border)">Related Electrical Filings (${electrical.length})</div>`;
+    elevDetailHtml += `<table class="bin-table"><thead><tr>
+      <th>Filing #</th><th>Filed</th><th>Work Description</th><th>Status</th>
+    </tr></thead><tbody>`;
+    electrical.forEach(d => {
+      const done = FILING_CLOSED.some(s => (d.filing_status||'').toUpperCase().includes(s));
+      elevDetailHtml += `<tr style="${done?'opacity:.65':''}">
+        <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
+        <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;max-width:220px;white-space:normal">${(d.descriptionofwork||d.description_of_work||'').slice(0,90)||'—'}</td>
+        <td><span class="badge ${done?'badge-resolved':'badge-pending'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
+      </tr>`;
+    });
+    elevDetailHtml += '</tbody></table>';
+  }
 
-  // 4. Technical Reports / Special Inspections
+  // 4. Technical Reports / Special Inspections (no expandable detail — data not available)
   const siActive  = si.active_count || 0;
   const siTotal   = si.total || 0;
   const siColor   = siTotal === 0 ? 'green' : siActive === 0 ? 'green' : 'yellow';
@@ -3491,19 +3595,19 @@ function renderTCOStatusTab(data) {
   const siDetail  = siActive > 0 ? '⚠️ Certification status (Identified/Certified/Waived) not available via NYC Open Data — verify in DOB BIS TR1 form' : null;
 
   // 5. BIS Administrative Items — manual checklist (section='bis')
-  const bisItems   = tcoItems.filter(t => t.section === 'bis');
-  const bisOpen    = bisItems.filter(t => t.status === 'open').length;
-  const bisPending = bisItems.filter(t => t.status === 'pending').length;
+  const bisItems    = tcoItems.filter(t => t.section === 'bis');
+  const bisOpen     = bisItems.filter(t => t.status === 'open').length;
+  const bisPending  = bisItems.filter(t => t.status === 'pending').length;
   const bisResolved = bisItems.filter(t => t.status === 'resolved').length;
-  const bisColor   = bisItems.length === 0 ? 'yellow'
+  const bisColor    = bisItems.length === 0 ? 'yellow'
     : bisOpen === 0 && bisPending === 0 ? 'green'
     : bisOpen > 0 ? 'red' : 'yellow';
-  const bisSummary = bisItems.length === 0
+  const bisSummary  = bisItems.length === 0
     ? 'No BIS administrative items tracked — add them in the TCO Checklist tab'
     : `${bisOpen} open · ${bisPending} pending · ${bisResolved} resolved (${bisItems.length} total)`;
-  const bisDetail  = bisItems.length > 0 ? 'Manage items in the TCO Checklist tab → BIS Administrative section' : null;
+  const bisDetail   = bisItems.length > 0 ? 'Manage items in the TCO Checklist tab → BIS Administrative section' : null;
 
-  // 6. Open Violations
+  // 6. Open Violations — expandable ECB + DOB tables
   const openECB    = violations.ecb_open_count || 0;
   const openDOB    = violations.dob_open_count || 0;
   const openSafety = violations.safety_open_count || 0;
@@ -3511,7 +3615,42 @@ function renderTCOStatusTab(data) {
   const violColor  = openTotal === 0 ? 'green' : 'red';
   const violSummary = openTotal === 0
     ? 'No open violations'
-    : `${openTotal} open violation(s) — ECB: ${openECB} · DOB: ${openDOB} · Safety: ${openSafety}`;
+    : `${openTotal} open violation(s) — ECB: ${openECB} · DOB: ${openDOB} · Safety: ${openSafety} — click to expand`;
+
+  let violDetailHtml = '';
+  const ecbOpen = violations.ecb_open || [];
+  const dobOpen = violations.dob_open || [];
+  if (ecbOpen.length) {
+    violDetailHtml += `<div style="padding:6px 12px 3px;font-size:11px;font-weight:600">Open ECB Violations (${ecbOpen.length})</div>`;
+    violDetailHtml += `<table class="bin-table"><thead><tr>
+      <th>ECB #</th><th>Issued</th><th>Description</th><th>Penalty</th><th>Status</th>
+    </tr></thead><tbody>`;
+    ecbOpen.forEach(v => {
+      violDetailHtml += `<tr>
+        <td class="mono" style="font-size:10px">${v.ecb_violation_number||'—'}</td>
+        <td style="font-size:11px">${(v.issue_date||v.violation_date||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;max-width:220px;white-space:normal">${(v.violation_description||v.description||'').slice(0,100)||'—'}</td>
+        <td style="font-size:11px">${v.penality_imposed||v.penalty_imposed||'—'}</td>
+        <td><span class="badge badge-open" style="font-size:9px">${v.ecb_violation_status||'—'}</span></td>
+      </tr>`;
+    });
+    violDetailHtml += '</tbody></table>';
+  }
+  if (dobOpen.length) {
+    violDetailHtml += `<div style="padding:6px 12px 3px;font-size:11px;font-weight:600;border-top:1px solid var(--border)">Open DOB Violations (${dobOpen.length})</div>`;
+    violDetailHtml += `<table class="bin-table"><thead><tr>
+      <th>Violation #</th><th>Issued</th><th>Description</th><th>Category</th>
+    </tr></thead><tbody>`;
+    dobOpen.forEach(v => {
+      violDetailHtml += `<tr>
+        <td class="mono" style="font-size:10px">${v.isn_dob_bis_viol||'—'}</td>
+        <td style="font-size:11px">${(v.issue_date||v.date_of_violation||'').slice(0,10)||'—'}</td>
+        <td style="font-size:11px;max-width:220px;white-space:normal">${(v.description||v.violation_category||'').slice(0,100)||'—'}</td>
+        <td style="font-size:11px">${v.violation_category||'—'}</td>
+      </tr>`;
+    });
+    violDetailHtml += '</tbody></table>';
+  }
 
   // Summary bar
   const statuses = [gcColor, plbColor, elevColor, siColor, bisColor, violColor];
@@ -3519,20 +3658,29 @@ function renderTCOStatusTab(data) {
   const pending  = statuses.filter(s => s === 'yellow').length;
   const clear    = statuses.filter(s => s === 'green').length;
 
-  let html = `<div class="bin-stats-bar">
-    <div class="bin-stat"><span class="bin-stat-val ${blocking > 0 ? 'bin-stat-open' : 'bin-stat-resolved'}">${blocking}</span><span class="bin-stat-lbl">Blocking</span></div>
-    <div class="bin-stat"><span class="bin-stat-val">${pending}</span><span class="bin-stat-lbl">Pending</span></div>
-    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${clear}</span><span class="bin-stat-lbl">Clear</span></div>
-    <div class="bin-stat"><span class="bin-stat-val">${coHistory.length}</span><span class="bin-stat-lbl">COs on Record</span></div>
+  let html = `<div id="tco-print-header" style="display:none;padding:12px 16px 0">
+    <div style="font-size:16pt;font-weight:700">${project.name||'Project'} — TCO Status Report</div>
+    <div style="font-size:10pt;color:#666">${project.address||''} · Generated: ${new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})}</div>
+    <hr style="margin:8px 0;border:none;border-top:2px solid #333">
   </div>`;
 
-  html += `<div style="padding:12px 16px 4px">`;
-  html += sectionCard('🏗️', 'Construction Signoff', gcColor, gcSummary, null);
-  html += sectionCard('🔧', 'Plumbing Signoff', plbColor, plbSummary, null);
-  html += sectionCard('🛗', 'Elevator Signoff', elevColor, elevSummary, null);
-  html += sectionCard('📋', 'Technical Reports / Special Inspections', siColor, siSummary, siDetail);
-  html += sectionCard('📁', 'BIS Administrative Items', bisColor, bisSummary, bisDetail);
-  html += sectionCard('🚫', 'Open Violations', violColor, violSummary, null);
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 16px 0">
+    <div class="bin-stats-bar" style="margin:0;flex:1">
+      <div class="bin-stat"><span class="bin-stat-val ${blocking>0?'bin-stat-open':'bin-stat-resolved'}">${blocking}</span><span class="bin-stat-lbl">Blocking</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${pending}</span><span class="bin-stat-lbl">Pending</span></div>
+      <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${clear}</span><span class="bin-stat-lbl">Clear</span></div>
+      <div class="bin-stat"><span class="bin-stat-val">${coHistory.length}</span><span class="bin-stat-lbl">COs on Record</span></div>
+    </div>
+    <button onclick="printTCOReport()" style="margin-left:12px;padding:5px 12px;font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text);white-space:nowrap">📄 Print / Save PDF</button>
+  </div>`;
+
+  html += `<div style="padding:10px 16px 4px">`;
+  html += sectionCard('🏗️', 'Construction Signoff', gcColor, gcSummary, null, gcDetailHtml, gcDetailHtml ? 'tco-gc-detail' : null);
+  html += sectionCard('🔧', 'Plumbing Signoff', plbColor, plbSummary, null, plbDetailHtml, plbDetailHtml ? 'tco-plb-detail' : null);
+  html += sectionCard('🛗', 'Elevator Signoff', elevColor, elevSummary, '⚠️ DOB requires ≥50% of elevator devices to be permanently signed off for TCO.', elevDetailHtml, 'tco-elev-detail');
+  html += sectionCard('📋', 'Technical Reports / Special Inspections', siColor, siSummary, siDetail, null, null);
+  html += sectionCard('📁', 'BIS Administrative Items', bisColor, bisSummary, bisDetail, null, null);
+  html += sectionCard('🚫', 'Open Violations', violColor, violSummary, null, violDetailHtml||null, violDetailHtml ? 'tco-viol-detail' : null);
   html += `</div>`;
 
   // CO History table
@@ -3546,13 +3694,13 @@ function renderTCOStatusTab(data) {
     coHistory.forEach(c => {
       const isTCO = c.co_type === 'TCO';
       html += `<tr>
-        <td style="font-size:11px">${c.date || '—'}</td>
-        <td><span class="badge ${isTCO ? 'badge-pending' : 'badge-resolved'}" style="font-size:9px">${c.co_type || '—'}</span></td>
-        <td style="font-size:11px">${c.filing_type || '—'}</td>
+        <td style="font-size:11px">${c.date||'—'}</td>
+        <td><span class="badge ${isTCO?'badge-pending':'badge-resolved'}" style="font-size:9px">${c.co_type||'—'}</span></td>
+        <td style="font-size:11px">${c.filing_type||'—'}</td>
         <td style="font-size:10px;color:var(--text-muted)">${c.source}</td>
-        <td class="mono" style="font-size:10px">${c.job_number || '—'}</td>
-        <td class="mono" style="font-size:10px">${c.co_number || '—'}</td>
-        <td style="font-size:11px">${c.units || '—'}</td>
+        <td class="mono" style="font-size:10px">${c.job_number||'—'}</td>
+        <td class="mono" style="font-size:10px">${c.co_number||'—'}</td>
+        <td style="font-size:11px">${c.units||'—'}</td>
       </tr>`;
     });
     html += `</tbody></table>`;
