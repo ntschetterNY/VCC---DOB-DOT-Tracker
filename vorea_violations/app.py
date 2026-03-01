@@ -1403,6 +1403,75 @@ def fetch_dobnow_special_inspections_by_bin(bin_number):
         return []
 
 
+def fetch_co_history_by_bin(bin_number):
+    """Fetch CO/TCO issuance history for a BIN from two NYC Open Data datasets:
+    - pkdm-hqz6: DOB NOW Certificate of Occupancy (post-March 2021)
+    - bs8b-p36w: Legacy BIS Certificate of Occupancy
+    Returns a list of normalized dicts sorted by date descending.
+    """
+    from datetime import datetime
+    records = []
+
+    # DOB NOW COs (pkdm-hqz6) — filter by bin field
+    try:
+        r = requests.get(
+            "https://data.cityofnewyork.us/resource/pkdm-hqz6.json",
+            params={"bin": bin_number, "$limit": 200, "$order": "c_of_o_issuance_date DESC"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        for d in r.json():
+            raw_date = d.get('c_of_o_issuance_date', '')
+            try:
+                # Format: "09/02/25  1:24:22 PM" — extract date part before spaces
+                normalized = datetime.strptime(raw_date.strip()[:8], '%m/%d/%y').strftime('%Y-%m-%d')
+            except Exception:
+                normalized = ''
+            status = d.get('c_of_o_status', '')
+            is_tco = 'TCO' in status.upper()
+            records.append({
+                'source':      'DOB NOW',
+                'co_type':     'TCO' if is_tco else ('CO' if status else ''),
+                'filing_type': d.get('c_of_o_filing_type', ''),
+                'date':        normalized,
+                'expiration':  '',
+                'job_number':  d.get('job_filing_name', ''),
+                'co_number':   d.get('c_of_o_number', ''),
+                'units':       d.get('number_of_dwelling_units', ''),
+                'status':      status,
+            })
+    except Exception as e:
+        logger.warning("CO fetch pkdm-hqz6 BIN %s: %s", bin_number, e)
+
+    # Legacy BIS COs (bs8b-p36w) — filter by bin field
+    try:
+        r = requests.get(
+            "https://data.cityofnewyork.us/resource/bs8b-p36w.json",
+            params={"bin": bin_number, "$limit": 200, "$order": "c_o_issue_date DESC"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        for d in r.json():
+            raw_date = d.get('c_o_issue_date', '')
+            normalized = raw_date[:10] if raw_date else ''  # ISO → YYYY-MM-DD
+            issue_type = (d.get('issue_type') or '').strip()
+            records.append({
+                'source':      'BIS Legacy',
+                'co_type':     'TCO' if issue_type.lower() == 'temporary' else ('CO' if issue_type.lower() == 'final' else issue_type),
+                'filing_type': d.get('application_status_raw', ''),
+                'date':        normalized,
+                'expiration':  '',
+                'job_number':  d.get('job_number', ''),
+                'co_number':   d.get('item_number', ''),
+                'units':       '',
+                'status':      d.get('application_status_raw', ''),
+            })
+    except Exception as e:
+        logger.warning("CO fetch bs8b-p36w BIN %s: %s", bin_number, e)
+
+    return sorted(records, key=lambda x: x['date'], reverse=True)
+
+
 def _parse_tr1_api_response(data):
     """Extract Special/Progress inspection category lists from a DOB NOW API response."""
     result = {'special_inspections': [], 'progress_inspections': []}
@@ -1963,6 +2032,7 @@ def get_project_report(project_id):
     complaints     = []
     electrical     = []
     elevator_perm  = []
+    co_history     = []
 
     for b in bin_list:
         permits        += fetch_permits_by_bin(b)
@@ -1974,6 +2044,7 @@ def get_project_report(project_id):
         complaints     += fetch_dob_complaints_by_bin(b)
         electrical     += fetch_electrical_permits_by_bin(b)
         elevator_perm  += fetch_elevator_permits_by_bin(b)
+        co_history     += fetch_co_history_by_bin(b)
 
     # DOT permits: query by project address (no BIN field in this dataset)
     house_no, street_name = parse_project_address(project['address'])
@@ -2034,6 +2105,8 @@ def get_project_report(project_id):
     open_electrical = [e for e in electrical
                        if str(e.get('filing_status', '')).upper() not in ELEC_CLOSED]
 
+    co_history.sort(key=lambda x: x['date'], reverse=True)
+
     # Special Inspections summary — derived from already-fetched DOB NOW filings
     # (field is specialinspectionrequirement — no underscores — comma-separated category names)
     si_filings = [
@@ -2076,6 +2149,10 @@ def get_project_report(project_id):
             'active_count':   len(si_active),
             'note': ('Use /api/projects/{id}/special-inspections for full TR1 category detail.'
                      if si_filings else None),
+        },
+        'co_history': {
+            'all':   co_history,
+            'total': len(co_history),
         },
     })
 
