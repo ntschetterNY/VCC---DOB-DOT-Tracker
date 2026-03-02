@@ -2137,8 +2137,9 @@ def get_project_report(project_id):
     active_dobnow = [d for d in dobnow if d.get('filing_status', '').upper() not in NOW_CLOSED]
 
     open_viol = [v for v in violations
-                 if 'RESOLVED' not in str(v.get('violation_category', '')).upper()
-                 and 'CLOSED'   not in str(v.get('violation_category', '')).upper()]
+                 if 'ACTIVE' in str(v.get('violation_category', '')).upper()
+                 or ('RESOLVED' not in str(v.get('violation_category', '')).upper()
+                     and 'CLOSED'   not in str(v.get('violation_category', '')).upper())]
 
     SAFETY_CLOSED = {'RESOLVED', 'CLOSED', 'COMPLIED', 'DISMISSED'}
     open_safety = [v for v in safety_viols

@@ -1044,7 +1044,7 @@
       body.tco-printing #tco-print-container a { color: #000 !important; text-decoration: none !important; }
       body.tco-printing #tco-print-container button,
       body.tco-printing #tco-print-container select { display: none !important; }
-      @page { margin: 0.75in; size: letter portrait; }
+      @page { margin: 1.25in; size: letter portrait; }
     }
   </style>
 </head>
@@ -3530,7 +3530,7 @@ function renderTCOStatusTab(data) {
   const coHistory  = (data.co_history && data.co_history.all) || [];
   const project    = data.project || {};
 
-  const FILING_CLOSED = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN','APPROVED','SIGNED OFF','COMPLETED','DISAPPROVED'];
+  const FILING_CLOSED = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN','APPROVED','SIGNED OFF','COMPLETED','DISAPPROVED','LOC ISSUED'];
   function isClosed(status) { return FILING_CLOSED.some(s => (status||'').toUpperCase().includes(s)); }
 
   // Expandable section card — detailHtml/cardId are optional
@@ -3565,9 +3565,9 @@ function renderTCOStatusTab(data) {
     // Mutually exclusive buckets
     const bucketActive   = rows.filter(d => !isClosed(d.filing_status));
     const bucketSignedOff = rows.filter(d =>  isClosed(d.filing_status) &&
-      (d.signoff_date || (d.filing_status||'').toUpperCase().includes('SIGN')));
+      (d.signoff_date || (d.filing_status||'').toUpperCase().includes('SIGN') || (d.filing_status||'').toUpperCase().includes('LOC')));
     const bucketClosed   = rows.filter(d =>  isClosed(d.filing_status) &&
-      !d.signoff_date && !(d.filing_status||'').toUpperCase().includes('SIGN'));
+      !d.signoff_date && !(d.filing_status||'').toUpperCase().includes('SIGN') && !(d.filing_status||'').toUpperCase().includes('LOC'));
 
     function rowHtml(d) {
       const closed    = isClosed(d.filing_status);
@@ -3606,10 +3606,11 @@ function renderTCOStatusTab(data) {
   const gcDetailHtml = gcFilings.length ? filingDetailTable(gcFilings, 'general_construction_work_type_') : null;
 
   // 2. Plumbing Signoff — only SD (Standpipe), SP (Sprinkler), EW (Equipment Work), PL (Plumbing)
-  const PLB_WORK_CODES = ['PL', 'SD', 'SP', 'EW'];
+  // Match both short codes (word-boundary) and full names in plumbing_work_type field
+  const PLB_RE = /\bPL\b|PLUMBING|\bSD\b|STANDPIPE|\bSP\b|SPRINKLER|\bEW\b|EQUIPMENT/;
   const plbFilings  = dobnowAll.filter(d => {
     const wt = (d.plumbing_work_type || '').toUpperCase();
-    return wt && PLB_WORK_CODES.some(c => new RegExp('\\b' + c + '\\b').test(wt));
+    return wt && PLB_RE.test(wt);
   });
   const plbActive   = plbFilings.filter(d => !isClosed(d.filing_status));
   const plbUnsigned = plbActive.filter(d => !d.signoff_date);
@@ -3623,14 +3624,14 @@ function renderTCOStatusTab(data) {
 
   // 3. Elevator Signoff — 50% of non-hoist permit filings must reach JOB SIGNED-OFF
   //    Personnel/Material Hoists are excluded from the 50% count but must be closed out.
-  const ELEV_SIGNED_OFF = 'JOB SIGNED-OFF';
+  const ELEV_OK_STATUSES = ['JOB SIGNED-OFF', 'LOC ISSUED'];
   const HOIST_KW = ['personnel hoist', 'material hoist', 'personnel/material hoist'];
   function isHoist(d) {
     return HOIST_KW.some(k => (d.elevatordevicetype||d.device_type||'').toLowerCase().includes(k));
   }
   const elevCore    = elevAll.filter(d => !isHoist(d));
   const elevHoists  = elevAll.filter(d =>  isHoist(d));
-  const elevSigned  = elevCore.filter(d => (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF);
+  const elevSigned  = elevCore.filter(d => ELEV_OK_STATUSES.includes((d.filing_status||'').toUpperCase()));
   const elevPct     = elevCore.length > 0 ? elevSigned.length / elevCore.length : null;
   const hoistActive = elevHoists.filter(d => !isClosed(d.filing_status));
   const elevColor   = elevAll.length === 0 ? 'green'
