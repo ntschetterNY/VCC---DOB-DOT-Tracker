@@ -3664,7 +3664,7 @@ function renderTCOStatusTab(data) {
       <th>Filing #</th><th>Filed</th><th>Device Type</th><th>Work Description</th><th>Status</th>
     </tr></thead><tbody>`;
     elevCore.forEach(d => {
-      const signed = (d.filing_status||'').toUpperCase() === ELEV_SIGNED_OFF;
+      const signed = ELEV_OK_STATUSES.includes((d.filing_status||'').toUpperCase());
       const closed = isClosed(d.filing_status);
       elevDetailHtml += `<tr style="${closed && !signed ? 'opacity:.65' : ''}">
         <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
