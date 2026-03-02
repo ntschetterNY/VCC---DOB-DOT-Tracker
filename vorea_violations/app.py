@@ -1181,21 +1181,27 @@ def fetch_permits_by_bin(bin_number):
 def fetch_dobnow_by_bin(bin_number):
     """DOB NOW Build — Job Application Filings (w9ak-ipjd) by BIN."""
     url = "https://data.cityofnewyork.us/resource/w9ak-ipjd.json"
-    params = {
-        "bin": bin_number, "$limit": 300, "$order": "filing_date DESC",
-        "$select": ("job_filing_number,bin,borough,house_no,street_name,job_type,"
-                    "filing_status,filing_date,approved_date,signoff_date,"
-                    "owner_s_business_name,general_construction_work_type_,"
-                    "mechanical_systems_work_type_,plumbing_work_type,structural_work_type_,"
-                    "specialinspectionrequirement,progressinspectionrequirement,"
-                    "special_inspection_agency_number")
-    }
-    try:
-        r = requests.get(url, params=params, timeout=30)
-        r.raise_for_status()
-        return r.json() if isinstance(r.json(), list) else []
-    except Exception:
-        return []
+    base_select = ("job_filing_number,bin,borough,house_no,street_name,job_type,"
+                   "filing_status,filing_date,approved_date,signoff_date,"
+                   "owner_s_business_name,general_construction_work_type_,"
+                   "mechanical_systems_work_type_,plumbing_work_type,structural_work_type_,"
+                   "specialinspectionrequirement,progressinspectionrequirement,"
+                   "special_inspection_agency_number")
+    # Try to include agency name + applicant fields (may not exist in all API versions)
+    extended_select = base_select + (",special_inspection_agency_name,"
+                                     "applicant_s_first_name,applicant_s_last_name,"
+                                     "applicant_s_business_name")
+    for sel in (extended_select, base_select):
+        try:
+            r = requests.get(url, params={"bin": bin_number, "$limit": 300,
+                                          "$order": "filing_date DESC", "$select": sel},
+                             timeout=30)
+            if r.status_code == 200:
+                data = r.json()
+                return data if isinstance(data, list) else []
+        except Exception:
+            pass
+    return []
 
 def fetch_dobnow_permits_by_bin(bin_number):
     """DOB NOW Build – Approved Permits (rbx6-tga4) by BIN."""
@@ -1431,13 +1437,7 @@ def fetch_dobnow_special_inspections_by_bin(bin_number):
         "$where": "specialinspectionrequirement IS NOT NULL",
         "$limit": 100,
         "$order": "filing_date DESC",
-        "$select": (
-            "job_filing_number,bin,borough,house_no,street_name,job_type,"
-            "filing_status,filing_date,approved_date,signoff_date,"
-            "owner_s_business_name,specialinspectionrequirement,"
-            "progressinspectionrequirement,special_inspection_agency_number,"
-            "general_construction_work_type_,structural_work_type_"
-        ),
+        # No $select — fetch all fields so agency name / applicant fields are included
     }
     try:
         r = requests.get(url, params=params, timeout=30)
@@ -1518,11 +1518,23 @@ def fetch_co_history_by_bin(bin_number):
 
 def _parse_tr1_api_response(data):
     """Extract Special/Progress inspection category lists from a DOB NOW API response."""
-    result = {'special_inspections': [], 'progress_inspections': []}
+    result = {'special_inspections': [], 'progress_inspections': [],
+              'agency_name': '', 'responsible_engineer': ''}
     if isinstance(data, list):
         data = data[0] if data else {}
     if not isinstance(data, dict):
         return result
+
+    # Extract agency / responsible engineer from portal response (key names vary by endpoint)
+    result['agency_name'] = str(
+        data.get('specialInspectionAgencyName') or data.get('special_inspection_agency_name') or
+        data.get('agencyName') or data.get('agency_name') or data.get('AgencyName') or ''
+    ).strip()
+    result['responsible_engineer'] = str(
+        data.get('responsibleEngineer') or data.get('responsible_engineer') or
+        data.get('engineerName') or data.get('engineer_name') or
+        data.get('inspectorName') or data.get('EngineerName') or ''
+    ).strip()
 
     sections = [
         (
@@ -2280,6 +2292,13 @@ def get_project_special_inspections(project_id):
             'signoff_date':            (filing.get('signoff_date') or '')[:10],
             'owner':                   filing.get('owner_s_business_name', ''),
             'si_agency_number':        filing.get('special_inspection_agency_number', ''),
+            'si_agency_name':          (tr1.get('agency_name', '') or
+                                        filing.get('special_inspection_agency_name', '')),
+            'si_responsible_engineer': tr1.get('responsible_engineer', ''),
+            'si_applicant':            (' '.join(filter(None, [
+                                           filing.get('applicant_s_first_name', ''),
+                                           filing.get('applicant_s_last_name', ''),
+                                       ])) or filing.get('applicant_s_business_name', '')),
             'work_types': {
                 'general_construction': filing.get('general_construction_work_type_', ''),
                 'structural':           filing.get('structural_work_type_', ''),

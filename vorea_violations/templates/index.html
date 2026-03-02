@@ -2756,13 +2756,19 @@ function renderDOBNOWTab(dobnow) {
     html += `<div class="bin-section">
       <div class="bin-section-header"><span>Active / In-Review Filings</span><span class="bin-section-count">${active.length}</span></div>
       <table class="bin-table"><thead><tr>
-        <th>Filing #</th><th>BIN</th><th>Type</th><th>Work Types</th><th>Status</th><th>Filed</th><th>Owner / Business</th><th>Special Insp. Req.</th><th>SI Agency #</th>
+        <th>Filing #</th><th>BIN</th><th>Type</th><th>Work Types</th><th>Status</th><th>Filed</th><th>Owner / Business</th><th>Special Insp. Req.</th><th>SI Agency / Contact</th>
       </tr></thead><tbody>`;
     active.forEach(d => {
       const wt = [d.general_construction_work_type_, d.mechanical_systems_work_type_, d.plumbing_work_type, d.structural_work_type_].filter(Boolean).join('; ');
       const siReq = d.specialinspectionrequirement || '—';
-      const siAgency = d.special_inspection_agency_number || '—';
       const siStyle = siReq !== '—' ? 'color:var(--accent);font-weight:600' : 'color:var(--text-muted)';
+      const siAgencyNum  = d.special_inspection_agency_number || '';
+      const siAgencyName = d.special_inspection_agency_name || '';
+      const siApplicant  = [d.applicant_s_first_name, d.applicant_s_last_name].filter(Boolean).join(' ')
+                           || d.applicant_s_business_name || '';
+      const siAgencyCell = siAgencyName
+        ? `${siAgencyName}${siAgencyNum ? ' <span style="color:var(--text-muted)">#'+siAgencyNum+'</span>' : ''}`
+        : (siAgencyNum ? `#${siAgencyNum}` : '—');
       html += `<tr>
         <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
         <td class="mono" style="font-size:10px">${dobLink('bin', d.bin||'')}</td>
@@ -2772,7 +2778,7 @@ function renderDOBNOWTab(dobnow) {
         <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
         <td style="font-size:11px;max-width:160px;white-space:normal">${d.owner_s_business_name||'—'}</td>
         <td style="font-size:11px;${siStyle}">${siReq}</td>
-        <td class="mono" style="font-size:10px">${siAgency}</td>
+        <td style="font-size:11px;max-width:160px;white-space:normal">${siAgencyCell}${siApplicant ? '<br><span style="color:var(--text-muted);font-size:10px">'+siApplicant+'</span>' : ''}</td>
       </tr>`;
     });
     html += '</tbody></table></div>';
@@ -3497,13 +3503,22 @@ function renderSpecialInspectionsTab(data) {
   <table class="bin-table">
     <thead><tr>
       <th>Filing #</th><th>Filed</th><th>Job Type</th><th>Status</th>
-      <th>Special Inspection Categories</th><th>Progress Inspections</th><th>SI Agency #</th>
+      <th>Special Inspection Categories</th><th>Progress Inspections</th><th>SI Agency / Contact</th>
     </tr></thead><tbody>`;
   all.forEach(d => {
     const cats = (d.specialinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean);
     const prog = (d.progressinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean);
     const pill = s => `<span style="display:inline-block;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin:2px;font-size:10px">${s}</span>`;
     const isClosed = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN'].some(s => (d.filing_status||'').toUpperCase().includes(s));
+    const agencyNum  = d.special_inspection_agency_number || '';
+    const agencyName = d.special_inspection_agency_name || '';
+    const applicant  = [d.applicant_s_first_name, d.applicant_s_last_name].filter(Boolean).join(' ')
+                       || d.applicant_s_business_name || '';
+    const agencyDisplay = [
+      agencyName ? `<strong>${agencyName}</strong>` : (agencyNum ? `#${agencyNum}` : '—'),
+      agencyName && agencyNum ? `<span style="color:var(--text-muted)">#${agencyNum}</span>` : '',
+      applicant   ? `<span style="color:var(--text-muted)">${applicant}</span>` : '',
+    ].filter(Boolean).join('<br>');
     html += `<tr style="${isClosed?'opacity:.65':''}">
       <td class="mono" style="font-size:10px">${dobLink('job', d.job_filing_number||'')}</td>
       <td style="font-size:11px">${(d.filing_date||'').slice(0,10)||'—'}</td>
@@ -3511,7 +3526,7 @@ function renderSpecialInspectionsTab(data) {
       <td><span class="badge ${isClosed?'badge-resolved':'badge-pending'}" style="font-size:9px">${d.filing_status||'—'}</span></td>
       <td style="max-width:220px;white-space:normal">${cats.map(pill).join('')}</td>
       <td style="max-width:220px;white-space:normal">${prog.length ? prog.map(pill).join('') : '<span style="color:var(--text-muted)">—</span>'}</td>
-      <td class="mono" style="font-size:10px">${d.special_inspection_agency_number||'—'}</td>
+      <td style="font-size:11px;max-width:180px;white-space:normal">${agencyDisplay}</td>
     </tr>`;
   });
   html += '</tbody></table>';
@@ -3530,7 +3545,7 @@ function renderTCOStatusTab(data) {
   const coHistory  = (data.co_history && data.co_history.all) || [];
   const project    = data.project || {};
 
-  const FILING_CLOSED = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN','APPROVED','SIGNED OFF','COMPLETED','DISAPPROVED','LOC ISSUED'];
+  const FILING_CLOSED = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN','APPROVED','SIGNED OFF','COMPLETED','DISAPPROVED','LOC ISSUED','FULL DEMOLITION'];
   function isClosed(status) { return FILING_CLOSED.some(s => (status||'').toUpperCase().includes(s)); }
 
   // Expandable section card — detailHtml/cardId are optional
@@ -3600,9 +3615,11 @@ function renderTCOStatusTab(data) {
   const gcActive   = gcFilings.filter(d => !isClosed(d.filing_status));
   const gcUnsigned = gcActive.filter(d => !d.signoff_date);
   const gcColor    = gcActive.length === 0 ? 'green' : gcUnsigned.length === 0 ? 'green' : 'red';
-  const gcSummary  = gcActive.length
-    ? `${gcUnsigned.length} of ${gcActive.length} active filing(s) not signed off — click to expand`
-    : (gcFilings.length ? 'All general construction filings signed off or closed — click to expand' : 'No general construction filings found for this BIN');
+  const gcSummary  = gcFilings.length === 0
+    ? 'No general construction filings found for this BIN'
+    : gcActive.length === 0
+      ? `All ${gcFilings.length} general construction filing(s) signed off or closed — click to expand`
+      : `${gcActive.length} of ${gcFilings.length} filing(s) still open — click to expand`;
   const gcDetailHtml = gcFilings.length ? filingDetailTable(gcFilings, 'general_construction_work_type_') : null;
 
   // 2. Plumbing Signoff — only SD (Standpipe), SP (Sprinkler), EW (Equipment Work), PL (Plumbing)
@@ -3617,9 +3634,11 @@ function renderTCOStatusTab(data) {
   const plbColor    = plbActive.length === 0 ? 'green'
     : plbUnsigned.length === 0 ? 'green'
     : plbUnsigned.length < plbActive.length ? 'yellow' : 'red';
-  const plbSummary  = plbActive.length
-    ? `${plbUnsigned.length} of ${plbActive.length} active filing(s) not signed off — click to expand`
-    : (plbFilings.length ? 'All plumbing filings signed off or closed — click to expand' : 'No plumbing filings found for this BIN');
+  const plbSummary  = plbFilings.length === 0
+    ? 'No plumbing filings found for this BIN'
+    : plbActive.length === 0
+      ? `All ${plbFilings.length} plumbing filing(s) signed off or closed — click to expand`
+      : `${plbActive.length} of ${plbFilings.length} filing(s) still open — click to expand`;
   const plbDetailHtml = plbFilings.length ? filingDetailTable(plbFilings, 'plumbing_work_type') : null;
 
   // 3. Elevator Signoff — 50% of non-hoist permit filings must reach JOB SIGNED-OFF
@@ -3924,7 +3943,7 @@ function renderTRDetail(data, container) {
   // ── A. Per-filing table ──
   html += `<div style="padding:6px 14px 2px;font-size:11px;font-weight:600">Per-Permit Filing Summary</div>`;
   html += `<table class="bin-table"><thead><tr>
-    <th>Filing #</th><th>Status</th><th>Agency #</th><th>SI Categories</th><th>Portal?</th>
+    <th>Filing #</th><th>Status</th><th>SI Agency / Contact</th><th>SI Categories</th><th>Portal?</th>
   </tr></thead><tbody>`;
   filings.forEach(f => {
     const active = f.is_active;
@@ -3934,10 +3953,17 @@ function renderTRDetail(data, container) {
     const concreteTag = concrete
       ? `<span title="Concrete status: ${concrete.status||'?'}" style="margin-left:4px;font-size:9px;color:${concrete.status==='CERTIFYING'?'#f59e0b':concrete.status==='CERTIFIED'?'var(--resolved)':'var(--open)'}">🪨 ${concrete.status||'Concrete'}</span>`
       : '';
+    const agencyLine = f.si_agency_name
+      ? `<strong>${f.si_agency_name}</strong>${f.si_agency_number ? ' <span style="color:var(--text-muted)">#'+f.si_agency_number+'</span>' : ''}`
+      : (f.si_agency_number ? `#${f.si_agency_number}` : '—');
+    const engineerLine = f.si_responsible_engineer
+      ? `<br><span style="font-size:10px;color:var(--text-muted)">${f.si_responsible_engineer}</span>` : '';
+    const applicantLine = (!f.si_responsible_engineer && f.si_applicant)
+      ? `<br><span style="font-size:10px;color:var(--text-muted)">${f.si_applicant}</span>` : '';
     html += `<tr style="${active ? '' : 'opacity:.65'}">
       <td class="mono" style="font-size:10px">${dobLink('job', f.job_filing_number||'')}${concreteTag}</td>
       <td><span class="badge ${active?'badge-pending':'badge-resolved'}" style="font-size:9px">${f.filing_status||'—'}</span></td>
-      <td style="font-size:11px">${f.si_agency_number||'—'}</td>
+      <td style="font-size:11px;max-width:180px;white-space:normal">${agencyLine}${engineerLine}${applicantLine}</td>
       <td style="max-width:300px;white-space:normal">${siPills(allSI)}</td>
       <td style="font-size:10px;color:${f.portal_detail_available?'var(--resolved)':'var(--text-muted)'}">${f.portal_detail_available?'✓ Yes':'—'}</td>
     </tr>`;
@@ -3948,8 +3974,11 @@ function renderTRDetail(data, container) {
   const byAgency = {};
   filings.forEach(f => {
     const agKey = f.si_agency_number || '(No Agency #)';
-    if (!byAgency[agKey]) byAgency[agKey] = { filings: [], siSet: {} };
+    if (!byAgency[agKey]) byAgency[agKey] = { filings: [], siSet: {}, name: f.si_agency_name || '', engineer: f.si_responsible_engineer || '' };
     byAgency[agKey].filings.push(f);
+    // Prefer the first non-empty name/engineer we see for this agency
+    if (!byAgency[agKey].name && f.si_agency_name) byAgency[agKey].name = f.si_agency_name;
+    if (!byAgency[agKey].engineer && f.si_responsible_engineer) byAgency[agKey].engineer = f.si_responsible_engineer;
     [...(f.special_inspections||[]), ...(f.progress_inspections||[])].forEach(s => {
       byAgency[agKey].siSet[s.code||s.description||'?'] = s;
     });
@@ -3959,14 +3988,19 @@ function renderTRDetail(data, container) {
   if (agencyKeys.length) {
     html += `<div style="padding:8px 14px 2px;font-size:11px;font-weight:600;border-top:1px solid var(--border)">Per-Agency Summary (${agencyKeys.length} agency number(s))</div>`;
     html += `<table class="bin-table"><thead><tr>
-      <th>Agency #</th><th>Filing(s)</th><th>Active?</th><th>SI Categories Covered</th>
+      <th>Agency</th><th>Contact / Engineer</th><th>Filing(s)</th><th>Active?</th><th>SI Categories Covered</th>
     </tr></thead><tbody>`;
     agencyKeys.forEach(agKey => {
       const ag = byAgency[agKey];
       const activeCount = ag.filings.filter(f => f.is_active).length;
       const allCodes = Object.values(ag.siSet);
+      const agLabel = ag.name
+        ? `<strong>${ag.name}</strong><br><span style="color:var(--text-muted);font-size:10px">#${agKey}</span>`
+        : `<span class="mono">#${agKey}</span>`;
+      const contactLabel = ag.engineer || ag.filings.find(f=>f.si_applicant)?.si_applicant || '—';
       html += `<tr>
-        <td class="mono" style="font-size:11px;font-weight:600">${agKey}</td>
+        <td style="font-size:11px;max-width:160px;white-space:normal">${agLabel}</td>
+        <td style="font-size:11px;max-width:140px;white-space:normal">${contactLabel}</td>
         <td style="font-size:11px">${ag.filings.map(f => f.job_filing_number).join('<br>')}</td>
         <td style="font-size:11px">${activeCount > 0 ? `<span style="color:var(--open)">${activeCount} active</span>` : '<span style="color:var(--resolved)">All closed</span>'}</td>
         <td style="max-width:300px;white-space:normal">${siPills(allCodes)}</td>
