@@ -1632,6 +1632,39 @@ def scrape_dobnow_tr1_categories(job_filing_number):
     logger.debug("TR1 portal lookup returned no detail for filing %s", jfn)
     return empty
 
+def fetch_si_agency_names(agency_numbers):
+    """Lookup DOB Special Inspection Agency names from j3tr-in8t by license_number.
+    Returns a dict mapping agency_number → {name, person, status}."""
+    nums = list({str(n).strip() for n in agency_numbers if n and str(n).strip()})
+    if not nums:
+        return {}
+    where = ' OR '.join(f"license_number='{n}'" for n in nums[:50])
+    try:
+        r = requests.get(
+            'https://data.cityofnewyork.us/resource/j3tr-in8t.json',
+            params={'$where': where,
+                    '$select': 'license_number,business_name,first_name,last_name,license_status',
+                    '$limit': 100},
+            timeout=20,
+        )
+        r.raise_for_status()
+        result = {}
+        for rec in r.json():
+            num = str(rec.get('license_number', '')).strip()
+            if num:
+                name   = (rec.get('business_name') or '').strip().rstrip(',')
+                person = ' '.join(filter(None, [
+                    (rec.get('first_name') or '').strip().title(),
+                    (rec.get('last_name')  or '').strip().title(),
+                ]))
+                result[num] = {'name': name, 'person': person,
+                               'status': rec.get('license_status', '')}
+        return result
+    except Exception as e:
+        logger.debug("SI agency name lookup failed: %s", e)
+        return {}
+
+
 def bulk_fetch_building_addresses(bin_list):
     """Look up building addresses for a list of BINs via DOB Permit Issuance dataset.
     Returns a dict mapping bin → (house_no, street_name, boro_code)."""
@@ -2188,6 +2221,8 @@ def get_project_report(project_id):
         d for d in si_filings
         if str(d.get('filing_status', '')).upper() not in NOW_CLOSED
     ]
+    si_agency_nums = [d.get('special_inspection_agency_number', '') for d in si_filings]
+    si_agency_map  = fetch_si_agency_names(si_agency_nums)
 
     return jsonify({
         'project':       dict(project),
@@ -2218,6 +2253,7 @@ def get_project_report(project_id):
             'active_filings': si_active,
             'total':          len(si_filings),
             'active_count':   len(si_active),
+            'agency_map':     si_agency_map,
             'note': ('Use /api/projects/{id}/special-inspections for full TR1 category detail.'
                      if si_filings else None),
         },
@@ -2267,6 +2303,10 @@ def get_project_special_inspections(project_id):
             seen.add(jfn)
             unique_si.append(f)
 
+    # Batch-lookup agency company names from DOB Special Inspection Agency dataset
+    agency_nums = [f.get('special_inspection_agency_number', '') for f in unique_si]
+    agency_map  = fetch_si_agency_names(agency_nums)
+
     # Phase 2: attempt portal lookup for TR1 category detail on each filing
     # Check si_tr1_cache first (24-hour TTL) before hitting the portal
     NOW_CLOSED = {'APPROVED', 'SIGNED OFF', 'WITHDRAWN', 'COMPLETED', 'DISAPPROVED'}
@@ -2292,13 +2332,15 @@ def get_project_special_inspections(project_id):
             'signoff_date':            (filing.get('signoff_date') or '')[:10],
             'owner':                   filing.get('owner_s_business_name', ''),
             'si_agency_number':        filing.get('special_inspection_agency_number', ''),
-            'si_agency_name':          (tr1.get('agency_name', '') or
-                                        filing.get('special_inspection_agency_name', '')),
+            'si_agency_name':          (tr1.get('agency_name', '')
+                                        or filing.get('special_inspection_agency_name', '')
+                                        or agency_map.get(str(filing.get('special_inspection_agency_number', '')).strip(), {}).get('name', '')),
             'si_responsible_engineer': tr1.get('responsible_engineer', ''),
             'si_applicant':            (' '.join(filter(None, [
                                            filing.get('applicant_s_first_name', ''),
                                            filing.get('applicant_s_last_name', ''),
-                                       ])) or filing.get('applicant_s_business_name', '')),
+                                       ])) or filing.get('applicant_s_business_name', '')
+                                       or agency_map.get(str(filing.get('special_inspection_agency_number', '')).strip(), {}).get('person', '')),
             'work_types': {
                 'general_construction': filing.get('general_construction_work_type_', ''),
                 'structural':           filing.get('structural_work_type_', ''),

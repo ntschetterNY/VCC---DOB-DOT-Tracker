@@ -3491,6 +3491,41 @@ function renderSpecialInspectionsTab(data) {
     el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No special inspection requirements found for this project\'s DOB NOW filings.</div>';
     return;
   }
+
+  // Persist sort state + data reference across header-click re-renders
+  window._siTabData = data;
+  if (!window._siSortState) window._siSortState = {col: null, dir: 1};
+  const agencyMap = (data && data.agency_map) || {};
+  const sortState = window._siSortState;
+
+  function getSortVal(d, col) {
+    const agNum  = d.special_inspection_agency_number || '';
+    const agInfo = agencyMap[agNum] || {};
+    switch (col) {
+      case 'filing':  return d.job_filing_number || '';
+      case 'filed':   return d.filing_date || '';
+      case 'jobtype': return d.job_type || '';
+      case 'status':  return d.filing_status || '';
+      case 'agency':  return d.special_inspection_agency_name || agInfo.name || agNum;
+      default: return '';
+    }
+  }
+
+  let rows = [...all];
+  if (sortState.col) {
+    rows.sort((a, b) => {
+      const av = getSortVal(a, sortState.col).toLowerCase();
+      const bv = getSortVal(b, sortState.col).toLowerCase();
+      return av < bv ? -sortState.dir : av > bv ? sortState.dir : 0;
+    });
+  }
+
+  function thHtml(col, label) {
+    const active = sortState.col === col;
+    const arrow  = active ? (sortState.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th style="cursor:pointer;user-select:none" onclick="if(window._siSortState.col==='${col}'){window._siSortState.dir*=-1;}else{window._siSortState.col='${col}';window._siSortState.dir=1;}renderSpecialInspectionsTab(window._siTabData);">${label}${arrow}</th>`;
+  }
+
   const allCats   = all.flatMap(d => (d.specialinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean));
   const uniqueCats = new Set(allCats);
   let html = `<div class="bin-stats-bar">
@@ -3502,18 +3537,19 @@ function renderSpecialInspectionsTab(data) {
   </div>
   <table class="bin-table">
     <thead><tr>
-      <th>Filing #</th><th>Filed</th><th>Job Type</th><th>Status</th>
-      <th>Special Inspection Categories</th><th>Progress Inspections</th><th>SI Agency / Contact</th>
+      ${thHtml('filing','Filing #')}${thHtml('filed','Filed')}${thHtml('jobtype','Job Type')}${thHtml('status','Status')}
+      <th>Special Inspection Categories</th><th>Progress Inspections</th>${thHtml('agency','SI Agency / Contact')}
     </tr></thead><tbody>`;
-  all.forEach(d => {
+  rows.forEach(d => {
     const cats = (d.specialinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean);
     const prog = (d.progressinspectionrequirement||'').split(',').map(s=>s.trim()).filter(Boolean);
     const pill = s => `<span style="display:inline-block;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin:2px;font-size:10px">${s}</span>`;
     const isClosed = ['SIGNED-OFF','PERMIT EXPIRED','WITHDRAWN'].some(s => (d.filing_status||'').toUpperCase().includes(s));
     const agencyNum  = d.special_inspection_agency_number || '';
-    const agencyName = d.special_inspection_agency_name || '';
+    const agInfo     = agencyMap[agencyNum] || {};
+    const agencyName = d.special_inspection_agency_name || agInfo.name || '';
     const applicant  = [d.applicant_s_first_name, d.applicant_s_last_name].filter(Boolean).join(' ')
-                       || d.applicant_s_business_name || '';
+                       || d.applicant_s_business_name || agInfo.person || '';
     const agencyDisplay = [
       agencyName ? `<strong>${agencyName}</strong>` : (agencyNum ? `#${agencyNum}` : '—'),
       agencyName && agencyNum ? `<span style="color:var(--text-muted)">#${agencyNum}</span>` : '',
@@ -3622,11 +3658,11 @@ function renderTCOStatusTab(data) {
       : `${gcActive.length} of ${gcFilings.length} filing(s) still open — click to expand`;
   const gcDetailHtml = gcFilings.length ? filingDetailTable(gcFilings, 'general_construction_work_type_') : null;
 
-  // 2. Plumbing Signoff — only SD (Standpipe), SP (Sprinkler), EW (Equipment Work), PL (Plumbing)
-  // Match both short codes (word-boundary) and full names in plumbing_work_type field
+  // 2. Plumbing Signoff — SD (Standpipe), SP (Sprinkler), EW (Equipment Work), PL (Plumbing)
+  // Check both plumbing_work_type AND mechanical_systems_work_type_ — EW/SP/SD can appear in either
   const PLB_RE = /\bPL\b|PLUMBING|\bSD\b|STANDPIPE|\bSP\b|SPRINKLER|\bEW\b|EQUIPMENT/;
   const plbFilings  = dobnowAll.filter(d => {
-    const wt = (d.plumbing_work_type || '').toUpperCase();
+    const wt = [d.plumbing_work_type, d.mechanical_systems_work_type_].filter(Boolean).join(' ').toUpperCase();
     return wt && PLB_RE.test(wt);
   });
   const plbActive   = plbFilings.filter(d => !isClosed(d.filing_status));
@@ -3943,7 +3979,7 @@ function renderTRDetail(data, container) {
   // ── A. Per-filing table ──
   html += `<div style="padding:6px 14px 2px;font-size:11px;font-weight:600">Per-Permit Filing Summary</div>`;
   html += `<table class="bin-table"><thead><tr>
-    <th>Filing #</th><th>Status</th><th>SI Agency / Contact</th><th>SI Categories</th><th>Portal?</th>
+    <th>Filing #</th><th>Status</th><th>SI Agency / Contact</th>
   </tr></thead><tbody>`;
   filings.forEach(f => {
     const active = f.is_active;
@@ -3964,8 +4000,6 @@ function renderTRDetail(data, container) {
       <td class="mono" style="font-size:10px">${dobLink('job', f.job_filing_number||'')}${concreteTag}</td>
       <td><span class="badge ${active?'badge-pending':'badge-resolved'}" style="font-size:9px">${f.filing_status||'—'}</span></td>
       <td style="font-size:11px;max-width:180px;white-space:normal">${agencyLine}${engineerLine}${applicantLine}</td>
-      <td style="max-width:300px;white-space:normal">${siPills(allSI)}</td>
-      <td style="font-size:10px;color:${f.portal_detail_available?'var(--resolved)':'var(--text-muted)'}">${f.portal_detail_available?'✓ Yes':'—'}</td>
     </tr>`;
   });
   html += '</tbody></table>';
