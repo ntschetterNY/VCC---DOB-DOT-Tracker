@@ -1634,11 +1634,20 @@ def scrape_dobnow_tr1_categories(job_filing_number):
 
 def fetch_si_agency_names(agency_numbers):
     """Lookup DOB Special Inspection Agency names from j3tr-in8t by license_number.
+
+    j3tr-in8t stores license_number WITHOUT leading zeros (e.g. 5595),
+    while DOB NOW filings return special_inspection_agency_number WITH leading zeros
+    (e.g. 005595).  We strip leading zeros for the query and return entries keyed
+    by BOTH the stripped form and the original padded form so callers can look up
+    using whichever format they have.
+
     Returns a dict mapping agency_number → {name, person, status}."""
-    nums = list({str(n).strip() for n in agency_numbers if n and str(n).strip()})
-    if not nums:
+    raw_nums = list({str(n).strip() for n in agency_numbers if n and str(n).strip()})
+    if not raw_nums:
         return {}
-    where = ' OR '.join(f"license_number='{n}'" for n in nums[:50])
+    # Strip leading zeros for the Socrata query (dataset stores bare integers)
+    stripped = list({n.lstrip('0') or '0' for n in raw_nums})
+    where = ' OR '.join(f"license_number='{n}'" for n in stripped[:50])
     try:
         r = requests.get(
             'https://data.cityofnewyork.us/resource/j3tr-in8t.json',
@@ -1650,15 +1659,21 @@ def fetch_si_agency_names(agency_numbers):
         r.raise_for_status()
         result = {}
         for rec in r.json():
-            num = str(rec.get('license_number', '')).strip()
-            if num:
-                name   = (rec.get('business_name') or '').strip().rstrip(',')
-                person = ' '.join(filter(None, [
-                    (rec.get('first_name') or '').strip().title(),
-                    (rec.get('last_name')  or '').strip().title(),
-                ]))
-                result[num] = {'name': name, 'person': person,
-                               'status': rec.get('license_status', '')}
+            bare = str(rec.get('license_number', '')).strip()
+            if not bare:
+                continue
+            name   = (rec.get('business_name') or '').strip().rstrip(',')
+            person = ' '.join(filter(None, [
+                (rec.get('first_name') or '').strip().title(),
+                (rec.get('last_name')  or '').strip().title(),
+            ]))
+            entry = {'name': name, 'person': person, 'status': rec.get('license_status', '')}
+            result[bare] = entry                    # e.g. '5595'
+            result[bare.zfill(6)] = entry           # e.g. '005595' (DOB NOW pads to 6 digits)
+            # Also store any original padded form the caller might have used
+            for orig in raw_nums:
+                if orig.lstrip('0') == bare or orig == bare:
+                    result[orig] = entry
         return result
     except Exception as e:
         logger.debug("SI agency name lookup failed: %s", e)
