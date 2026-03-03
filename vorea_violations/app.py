@@ -1185,6 +1185,7 @@ def fetch_dobnow_by_bin(bin_number):
                    "filing_status,filing_date,approved_date,signoff_date,"
                    "owner_s_business_name,general_construction_work_type_,"
                    "mechanical_systems_work_type_,plumbing_work_type,structural_work_type_,"
+                   "sprinkler_work_type,standpipe,"
                    "specialinspectionrequirement,progressinspectionrequirement,"
                    "special_inspection_agency_number")
     # Try to include agency name + applicant fields (may not exist in all API versions)

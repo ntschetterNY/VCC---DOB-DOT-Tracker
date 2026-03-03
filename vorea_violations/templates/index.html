@@ -3658,13 +3658,22 @@ function renderTCOStatusTab(data) {
       : `${gcActive.length} of ${gcFilings.length} filing(s) still open — click to expand`;
   const gcDetailHtml = gcFilings.length ? filingDetailTable(gcFilings, 'general_construction_work_type_') : null;
 
-  // 2. Plumbing Signoff — SD (Standpipe), SP (Sprinkler), EW (Equipment Work), PL (Plumbing)
-  // Check both plumbing_work_type AND mechanical_systems_work_type_ — EW/SP/SD can appear in either
-  const PLB_RE = /\bPL\b|PLUMBING|\bSD\b|STANDPIPE|\bSP\b|SPRINKLER|\bEW\b|EQUIPMENT/;
-  const plbFilings  = dobnowAll.filter(d => {
-    const wt = [d.plumbing_work_type, d.mechanical_systems_work_type_].filter(Boolean).join(' ').toUpperCase();
-    return wt && PLB_RE.test(wt);
-  });
+  // 2. Plumbing Signoff — PL / EW / SP (Sprinkler) / SD (Standpipe)
+  // DOB NOW stores work types as binary "1"/"0" flags in separate fields — not text descriptions.
+  // sprinkler_work_type and standpipe are distinct fields from plumbing_work_type / mechanical_systems_work_type_.
+  function plbFlagSet(d) {
+    return d.plumbing_work_type == 1 || d.mechanical_systems_work_type_ == 1 ||
+           d.sprinkler_work_type == 1 || d.standpipe == 1;
+  }
+  function plbWorkTypeLabel(d) {
+    const parts = [];
+    if (d.plumbing_work_type == 1)          parts.push('Plumbing (PL)');
+    if (d.mechanical_systems_work_type_ == 1) parts.push('Equipment Work (EW)');
+    if (d.sprinkler_work_type == 1)         parts.push('Sprinkler (SP)');
+    if (d.standpipe == 1)                   parts.push('Standpipe (SD)');
+    return parts.join(', ') || '—';
+  }
+  const plbFilings  = dobnowAll.filter(plbFlagSet).map(d => ({...d, _plb_wt: plbWorkTypeLabel(d)}));
   const plbActive   = plbFilings.filter(d => !isClosed(d.filing_status));
   const plbUnsigned = plbActive.filter(d => !d.signoff_date);
   const plbColor    = plbActive.length === 0 ? 'green'
@@ -3675,7 +3684,7 @@ function renderTCOStatusTab(data) {
     : plbActive.length === 0
       ? `All ${plbFilings.length} plumbing filing(s) signed off or closed — click to expand`
       : `${plbActive.length} of ${plbFilings.length} filing(s) still open — click to expand`;
-  const plbDetailHtml = plbFilings.length ? filingDetailTable(plbFilings, 'plumbing_work_type') : null;
+  const plbDetailHtml = plbFilings.length ? filingDetailTable(plbFilings, '_plb_wt') : null;
 
   // 3. Elevator Signoff — 50% of non-hoist permit filings must reach JOB SIGNED-OFF
   //    Personnel/Material Hoists are excluded from the 50% count but must be closed out.
