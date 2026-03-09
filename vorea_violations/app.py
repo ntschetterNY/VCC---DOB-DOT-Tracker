@@ -1326,15 +1326,66 @@ def fetch_electrical_permits_by_bin(bin_number):
     except Exception:
         return []
 
-def fetch_ahv_permits_by_bin(bin_number):
-    """DOB After Hour Variance Permits (g76y-dcqj) by BIN."""
-    url = "https://data.cityofnewyork.us/resource/g76y-dcqj.json"
+# ── Active AHV feed — NYC DOB Analytics GitHub (updated daily ~10:45 AM EST) ──
+# Full citywide JSON (~1,500–2,200 rows). Downloaded once, cached in memory for
+# 4 hours, then filtered per BIN — far fresher than the stale Open Data dataset.
+_AHV_GITHUB_URL = (
+    "https://raw.githubusercontent.com/NYCDOB/ActiveAHVs/"
+    "gh-pages/data/activeAHVsJson.json"
+)
+_ahv_cache: dict = {"data": None, "ts": 0.0}
+_AHV_CACHE_TTL = 4 * 3600   # 4 hours
+
+
+def _fetch_active_ahvs_all() -> list:
+    """Download (or return cached) the full active-AHV JSON from DOB GitHub."""
+    import time
+    now = time.time()
+    if _ahv_cache["data"] is not None and (now - _ahv_cache["ts"]) < _AHV_CACHE_TTL:
+        return _ahv_cache["data"]
     try:
-        r = requests.get(url, params={"bin": bin_number, "$limit": 500, "$order": "variance_start_date_time DESC"}, timeout=30)
+        r = requests.get(_AHV_GITHUB_URL, timeout=30)
         r.raise_for_status()
-        return r.json() if isinstance(r.json(), list) else []
-    except Exception:
-        return []
+        raw = r.json()
+        if not isinstance(raw, list):
+            return _ahv_cache["data"] or []
+        # Normalize GitHub field names → schema used by renderAHVTab()
+        normalized = []
+        for rec in raw:
+            def _yn(v):
+                return "Y" if str(v or "").strip().upper() in ("YES", "Y", "TRUE", "1") else "N"
+            normalized.append({
+                "ahv_permit_number":       rec.get("Reference_Number", ""),
+                "workpermitnumber":        rec.get("Job_Number", ""),
+                "ahvpermitstatus":         rec.get("Record_Status_Description", ""),
+                "variancetype":            rec.get("Work_Type", ""),
+                "reasonforvariance":       rec.get("Reason", ""),
+                "variance_start_date_time": rec.get("Start_Date", ""),
+                "variance_end_date_time":   rec.get("End_Date", ""),
+                "demolition":              _yn(rec.get("Does_Work_Involve_Demolition")),
+                "crane_use":               _yn(rec.get("Does_Work_Involve_Crane_Use")),
+                "enclosed_work":           _yn(rec.get("Enclosed_Work")),
+                "residence_200ft":         _yn(rec.get("Residence_within_200ft")),
+                "weekend_work":            _yn(rec.get("Weekend_Work")),
+                "contractor":              rec.get("Contractor_Business_Name") or rec.get("Contractor_Name", ""),
+                "dob_now_link":            rec.get("Link", ""),
+                "source":                  rec.get("Source", ""),
+                # Keep original BIN for filtering
+                "_bin":                    str(rec.get("BIN", "")).strip(),
+            })
+        _ahv_cache["data"] = normalized
+        _ahv_cache["ts"]   = now
+        logging.info("AHV GitHub feed: cached %d active records", len(normalized))
+        return normalized
+    except Exception as exc:
+        logging.warning("AHV GitHub feed fetch failed: %s", exc)
+        return _ahv_cache["data"] or []
+
+
+def fetch_ahv_permits_by_bin(bin_number: str) -> list:
+    """Return active AHVs for a BIN from the DOB daily GitHub feed."""
+    target = str(bin_number).strip()
+    return [r for r in _fetch_active_ahvs_all() if r["_bin"] == target]
 
 # Borough code → name mapping for DOB datasets
 BORO_NAMES = {

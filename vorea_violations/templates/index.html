@@ -3409,7 +3409,10 @@ function renderAHVTab(data) {
   const all  = (data && data.all)  || [];
   const open = (data && data.open) || [];
   if (!all.length) {
-    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No after-hour variance permits found for this project.</div>';
+    el.innerHTML = `<div style="padding:2rem;color:var(--text-muted);text-align:center">
+      No active after-hour variance permits found for this project.<br>
+      <span style="font-size:11px">Data: DOB daily feed — active permits only</span>
+    </div>`;
     return;
   }
   const AHV_CLOSED = new Set(['EXPIRED','CANCELLED','REVOKED']);
@@ -3417,30 +3420,38 @@ function renderAHVTab(data) {
     <div class="bin-stat"><span class="bin-stat-val ${open.length>0?'bin-stat-open':''}">${open.length}</span><span class="bin-stat-lbl">Active</span></div>
     <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${all.length - open.length}</span><span class="bin-stat-lbl">Expired</span></div>
     <div class="bin-stat"><span class="bin-stat-val">${all.length}</span><span class="bin-stat-lbl">Total</span></div>
+    <div style="margin-left:auto;font-size:10px;color:var(--text-muted);align-self:center">Live feed · DOB daily update</div>
   </div>
   <table class="bin-table">
     <thead><tr>
-      <th>AHV #</th><th>Work Permit #</th><th>Type</th><th>Reason</th>
-      <th>Start</th><th>End</th><th>Flags</th><th>Status</th>
+      <th>AHV Ref #</th><th>Job #</th><th>Work Type</th><th>Reason</th>
+      <th>Start</th><th>End</th><th>Contractor</th><th>Flags</th><th>Status</th>
     </tr></thead><tbody>`;
   all.forEach(a => {
     const statusRaw = String(a.ahvpermitstatus || '').toUpperCase();
     const isClosed  = AHV_CLOSED.has(statusRaw);
     const rowOp     = isClosed ? 'opacity:.65;' : '';
-    const sc        = isClosed ? 'badge-resolved' : (statusRaw === 'ACTIVE' ? 'badge-open' : 'badge-pending');
+    const sc        = isClosed ? 'badge-resolved'
+                    : statusRaw.includes('ISSUED') || statusRaw.includes('ACTIVE') ? 'badge-open'
+                    : 'badge-pending';
     const flags     = [
-      a.demolition      === 'Y' ? 'Demo'        : null,
-      a.crane_use       === 'Y' ? 'Crane'       : null,
-      a.enclosed_work   === 'Y' ? 'Enclosed'    : null,
-      a.residence_200ft === 'Y' ? 'Res 200ft'   : null,
+      a.demolition      === 'Y' ? 'Demo'      : null,
+      a.crane_use       === 'Y' ? 'Crane'     : null,
+      a.enclosed_work   === 'Y' ? 'Enclosed'  : null,
+      a.residence_200ft === 'Y' ? 'Res 200ft' : null,
+      a.weekend_work    === 'Y' ? 'Weekend'   : null,
     ].filter(Boolean).join(', ') || '—';
+    const refCell = a.dob_now_link
+      ? `<a href="${a.dob_now_link}" target="_blank" class="mono" style="font-size:10px">${a.ahv_permit_number||'—'}</a>`
+      : `<span class="mono" style="font-size:10px">${a.ahv_permit_number||'—'}</span>`;
     html += `<tr style="${rowOp}">
-      <td class="mono" style="font-size:10px">${a.ahv_permit_number||'—'}</td>
+      <td>${refCell}</td>
       <td class="mono" style="font-size:10px">${a.workpermitnumber||'—'}</td>
-      <td style="font-size:11px;max-width:120px;white-space:normal">${a.variancetype||'—'}</td>
-      <td style="font-size:11px;max-width:180px;white-space:normal" title="${a.reasonforvariance||''}">${(a.reasonforvariance||'').slice(0,60)||'—'}</td>
-      <td style="font-size:11px;white-space:nowrap">${(a.variance_start_date_time||'').slice(0,16).replace('T',' ')||'—'}</td>
-      <td style="font-size:11px;white-space:nowrap">${(a.variance_end_date_time||'').slice(0,16).replace('T',' ')||'—'}</td>
+      <td style="font-size:11px;max-width:110px;white-space:normal">${a.variancetype||'—'}</td>
+      <td style="font-size:11px;max-width:160px;white-space:normal" title="${(a.reasonforvariance||'').replace(/"/g,'&quot;')}">${(a.reasonforvariance||'').slice(0,55)||'—'}</td>
+      <td style="font-size:11px;white-space:nowrap">${(a.variance_start_date_time||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px;white-space:nowrap">${(a.variance_end_date_time||'').slice(0,10)||'—'}</td>
+      <td style="font-size:11px;max-width:140px;white-space:normal">${a.contractor||'—'}</td>
       <td style="font-size:10px;color:var(--text-muted)">${flags}</td>
       <td><span class="badge ${sc}" style="font-size:9px">${a.ahvpermitstatus||'—'}</span></td>
     </tr>`;
