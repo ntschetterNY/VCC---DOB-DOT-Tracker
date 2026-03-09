@@ -1326,6 +1326,16 @@ def fetch_electrical_permits_by_bin(bin_number):
     except Exception:
         return []
 
+def fetch_ahv_permits_by_bin(bin_number):
+    """DOB After Hour Variance Permits (g76y-dcqj) by BIN."""
+    url = "https://data.cityofnewyork.us/resource/g76y-dcqj.json"
+    try:
+        r = requests.get(url, params={"bin": bin_number, "$limit": 500, "$order": "variance_start_date_time DESC"}, timeout=30)
+        r.raise_for_status()
+        return r.json() if isinstance(r.json(), list) else []
+    except Exception:
+        return []
+
 # Borough code → name mapping for DOB datasets
 BORO_NAMES = {
     "1": "Manhattan", "2": "Bronx", "3": "Brooklyn", "4": "Queens", "5": "Staten Island",
@@ -2137,6 +2147,7 @@ def get_project_report(project_id):
     complaints     = []
     electrical     = []
     elevator_perm  = []
+    ahv_permits    = []
     co_history     = []
 
     for b in bin_list:
@@ -2149,6 +2160,7 @@ def get_project_report(project_id):
         complaints     += fetch_dob_complaints_by_bin(b)
         electrical     += fetch_electrical_permits_by_bin(b)
         elevator_perm  += fetch_elevator_permits_by_bin(b)
+        ahv_permits    += fetch_ahv_permits_by_bin(b)
         co_history     += fetch_co_history_by_bin(b)
 
     # DOT permits: query by project address (no BIN field in this dataset)
@@ -2190,6 +2202,7 @@ def get_project_report(project_id):
     complaints     = dedup(complaints,     'complaint_number')
     electrical     = dedup(electrical,     'job_filing_number')
     elevator_perm  = dedup(elevator_perm,  'job_filing_number')
+    ahv_permits    = dedup(ahv_permits,    'ahv_permit_number')
 
     CLOSED = {'SIGNED OFF', 'EXPIRED', 'CANCELLED', 'WITHDRAWN'}
     open_permits = [p for p in permits if p.get('permit_status', '').upper() not in CLOSED]
@@ -2224,6 +2237,9 @@ def get_project_report(project_id):
     ELEC_CLOSED = {'PERMIT EXPIRED', 'JOB SIGNED-OFF', 'WITHDRAWN', 'DISAPPROVED', 'CANCELLED'}
     open_electrical = [e for e in electrical
                        if str(e.get('filing_status', '')).upper() not in ELEC_CLOSED]
+    AHV_CLOSED = {'EXPIRED', 'CANCELLED', 'REVOKED'}
+    open_ahv = [a for a in ahv_permits
+                if str(a.get('ahvpermitstatus', '')).upper() not in AHV_CLOSED]
 
     co_history.sort(key=lambda x: x['date'], reverse=True)
 
@@ -2262,6 +2278,8 @@ def get_project_report(project_id):
                           'total': len(complaints), 'open_count': len(open_complaints)},
         'electrical':    {'all': electrical, 'open': open_electrical,
                           'total': len(electrical), 'open_count': len(open_electrical)},
+        'ahv_permits':   {'all': ahv_permits, 'open': open_ahv,
+                          'total': len(ahv_permits), 'open_count': len(open_ahv)},
         'elevator':      {'all': elevator_perm,
                           'total': len(elevator_perm)},
         'special_inspections': {

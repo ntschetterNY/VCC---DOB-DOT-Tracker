@@ -1295,6 +1295,7 @@
           <button class="report-tab" onclick="showReportTab('tab-violations',this)">DOB Violations</button>
           <button class="report-tab" onclick="showReportTab('tab-ecb',this)">ECB Violations</button>
           <button class="report-tab" onclick="showReportTab('tab-complaints',this)">311 Complaints</button>
+          <button class="report-tab" onclick="showReportTab('tab-ahv',this)">AHV Permits</button>
           <button class="report-tab" onclick="showReportTab('tab-electrical',this)">Electrical</button>
           <button class="report-tab" onclick="showReportTab('tab-elevator',this)">Elevator</button>
           <button class="report-tab" onclick="showReportTab('tab-special-insp',this)">Special Inspections</button>
@@ -1306,6 +1307,7 @@
         <div id="tab-violations"     class="report-tab-content" style="display:none"></div>
         <div id="tab-ecb"            class="report-tab-content" style="display:none"></div>
         <div id="tab-complaints"     class="report-tab-content" style="display:none"></div>
+        <div id="tab-ahv"            class="report-tab-content" style="display:none"></div>
         <div id="tab-electrical"     class="report-tab-content" style="display:none"></div>
         <div id="tab-elevator"       class="report-tab-content" style="display:none"></div>
         <div id="tab-special-insp"  class="report-tab-content" style="display:none"></div>
@@ -2614,7 +2616,7 @@ async function showProject(project_id) {
   document.getElementById('reportTitle').textContent    = 'Loading…';
   document.getElementById('reportMeta').textContent     = 'Fetching data…';
   document.getElementById('reportBINs').innerHTML       = '';
-  ['tab-permits','tab-dot','tab-violations','tab-ecb','tab-complaints','tab-electrical','tab-elevator','tab-special-insp','tab-checklist'].forEach(id =>
+  ['tab-permits','tab-dot','tab-violations','tab-ecb','tab-complaints','tab-ahv','tab-electrical','tab-elevator','tab-special-insp','tab-checklist'].forEach(id =>
     document.getElementById(id).innerHTML =
       '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading…</div>');
   document.querySelectorAll('.report-tab').forEach((t,i) => t.classList.toggle('active-tab', i===0));
@@ -2639,6 +2641,7 @@ async function showProject(project_id) {
     renderViolationsTab(data.violations.dob, data.violations.dob_open);
     renderECBTab(data.violations.ecb, data.violations.ecb_open);
     renderComplaintsTab(data.complaints);
+    renderAHVTab(data.ahv_permits);
     renderElectricalTab(data.electrical);
     renderElevatorTab(data.elevator);
     renderSpecialInspectionsTab(data.special_inspections);
@@ -3394,6 +3397,52 @@ function renderComplaintsTab(data) {
       <td style="font-size:11px">${c.disposition_code||'—'}</td>
       <td style="font-size:11px">${(c.inspection_date||'').slice(0,10)||'—'}</td>
       <td><button class="btn btn-sm" onclick="openComplaintModal(${idx})" style="font-size:10px;padding:2px 8px">View</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// ── RENDER: AHV Permits Tab ───────────────────────────────────────────────────
+function renderAHVTab(data) {
+  const el  = document.getElementById('tab-ahv');
+  const all  = (data && data.all)  || [];
+  const open = (data && data.open) || [];
+  if (!all.length) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted);text-align:center">No after-hour variance permits found for this project.</div>';
+    return;
+  }
+  const AHV_CLOSED = new Set(['EXPIRED','CANCELLED','REVOKED']);
+  let html = `<div class="bin-stats-bar">
+    <div class="bin-stat"><span class="bin-stat-val ${open.length>0?'bin-stat-open':''}">${open.length}</span><span class="bin-stat-lbl">Active</span></div>
+    <div class="bin-stat"><span class="bin-stat-val bin-stat-resolved">${all.length - open.length}</span><span class="bin-stat-lbl">Expired</span></div>
+    <div class="bin-stat"><span class="bin-stat-val">${all.length}</span><span class="bin-stat-lbl">Total</span></div>
+  </div>
+  <table class="bin-table">
+    <thead><tr>
+      <th>AHV #</th><th>Work Permit #</th><th>Type</th><th>Reason</th>
+      <th>Start</th><th>End</th><th>Flags</th><th>Status</th>
+    </tr></thead><tbody>`;
+  all.forEach(a => {
+    const statusRaw = String(a.ahvpermitstatus || '').toUpperCase();
+    const isClosed  = AHV_CLOSED.has(statusRaw);
+    const rowOp     = isClosed ? 'opacity:.65;' : '';
+    const sc        = isClosed ? 'badge-resolved' : (statusRaw === 'ACTIVE' ? 'badge-open' : 'badge-pending');
+    const flags     = [
+      a.demolition      === 'Y' ? 'Demo'        : null,
+      a.crane_use       === 'Y' ? 'Crane'       : null,
+      a.enclosed_work   === 'Y' ? 'Enclosed'    : null,
+      a.residence_200ft === 'Y' ? 'Res 200ft'   : null,
+    ].filter(Boolean).join(', ') || '—';
+    html += `<tr style="${rowOp}">
+      <td class="mono" style="font-size:10px">${a.ahv_permit_number||'—'}</td>
+      <td class="mono" style="font-size:10px">${a.workpermitnumber||'—'}</td>
+      <td style="font-size:11px;max-width:120px;white-space:normal">${a.variancetype||'—'}</td>
+      <td style="font-size:11px;max-width:180px;white-space:normal" title="${a.reasonforvariance||''}">${(a.reasonforvariance||'').slice(0,60)||'—'}</td>
+      <td style="font-size:11px;white-space:nowrap">${(a.variance_start_date_time||'').slice(0,16).replace('T',' ')||'—'}</td>
+      <td style="font-size:11px;white-space:nowrap">${(a.variance_end_date_time||'').slice(0,16).replace('T',' ')||'—'}</td>
+      <td style="font-size:10px;color:var(--text-muted)">${flags}</td>
+      <td><span class="badge ${sc}" style="font-size:9px">${a.ahvpermitstatus||'—'}</span></td>
     </tr>`;
   });
   html += '</tbody></table>';
